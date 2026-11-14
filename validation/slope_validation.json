@@ -1,0 +1,62 @@
+{
+  "experiment": "HRSC-MOLA slope resolution sensitivity",
+  "source": "USGS Astrogeology; MOLA (Mars Global Surveyor, NASA) blended with HRSC (Mars Express, ESA). Fergason, Hare & Laura (2018).",
+  "sourceUrl": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m",
+  "method": "Horn 3x3 slope on original and block-averaged DEM",
+  "blockFactor": 3,
+  "fineShape": [
+    1482,
+    1482
+  ],
+  "coarseShape": [
+    494,
+    494
+  ],
+  "fineResolutionDegrees": [
+    0.003374120830641,
+    0.003374120830641
+  ],
+  "coarseResolutionDegrees": [
+    0.010122362491923,
+    0.010122362491923
+  ],
+  "validOverlapCells": 242064,
+  "fineSlopeMedianWithinBlockVsCoarseSlopeDifferenceDegrees": {
+    "signed": {
+      "count": 242064,
+      "mean": -0.7754449844360352,
+      "median": -0.5612196326255798,
+      "p90": 0.35345953702926636,
+      "p95": 0.7105216383934021,
+      "maximum": 9.181439399719238
+    },
+    "absolute": {
+      "count": 242064,
+      "mean": 0.9948774576187134,
+      "median": 0.675825834274292,
+      "p90": 2.2269887924194336,
+      "p95": 3.0399415493011475,
+      "maximum": 19.7504825592041
+    }
+  },
+  "terrainClassComparison": {
+    "comparedCells": 242064,
+    "changedCells": 24163,
+    "changedPercent": 9.98207085729394
+  },
+  "fineScaleHighSlopeNotHighOnCoarseGrid": {
+    "cells": 9979,
+    "percentOfValidOverlap": 4.122463480732368
+  },
+  "fineScaleWithinBlockSlopeVariability": {
+    "count": 244036,
+    "mean": 1.129359245300293,
+    "median": 0.8167288303375244,
+    "p90": 2.335908889770508,
+    "p95": 3.133263349533081,
+    "maximum": 16.517784118652344
+  },
+  "fineSlopeValidPercent": 99.73027658942851,
+  "coarseSlopeValidPercent": 99.19192250323722,
+  "interpretation": "This measures sensitivity to resolution and block averaging. The original-resolution slope is not independent ground truth."
+}

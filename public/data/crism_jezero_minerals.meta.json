@@ -1,0 +1,20 @@
+{
+  "id": "pia23380-crism-minerals",
+  "title": "Jezero crater mineral distribution (CRISM + CTX)",
+  "source": "NASA/JPL-Caltech/MSSS/JHU-APL/Purdue/USGS",
+  "sourceUrl": "https://science.nasa.gov/resource/jezero-crater-minerals/",
+  "productId": "PIA23380",
+  "description": "Color overlay highlighting minerals: green = carbonates, red = olivine sand. Derived from CRISM and CTX on MRO.",
+  "bounds": {
+    "west": 76.95,
+    "east": 78.35,
+    "south": 17.95,
+    "north": 19.05
+  },
+  "limitations": [
+    "Geographic bounds are approximate. The source is a publication RGB figure, not a map-projected science product.",
+    "The figure includes its own grayscale basemap, so it will not pixel-match Viking or THEMIS.",
+    "Not a quantitative mineral abundance map.",
+    "Coverage is limited to the Jezero crater region."
+  ]
+}

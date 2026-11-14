@@ -1,0 +1,20 @@
+{
+  "compared_cells": 242064,
+  "center_to_center": {
+    "mean_signed_difference_deg": -0.7562661170959473,
+    "median_signed_difference_deg": -0.5206894278526306,
+    "mean_absolute_difference_deg": 1.1068841218948364,
+    "median_absolute_difference_deg": 0.7322518825531006,
+    "p90_absolute_difference_deg": 2.518568754196167,
+    "p95_absolute_difference_deg": 3.453666925430298,
+    "max_absolute_difference_deg": 18.242351531982422
+  },
+  "within_cell_variability": {
+    "complete_blocks": 242064,
+    "mean_p90_minus_median_deg": 1.131658911705017,
+    "median_p90_minus_median_deg": 0.8187934756278992,
+    "p90_variability_deg": 2.3388776779174805,
+    "p95_variability_deg": 3.137526750564575,
+    "max_variability_deg": 16.517784118652344
+  }
+}

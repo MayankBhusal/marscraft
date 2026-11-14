@@ -1,0 +1,44 @@
+{
+  "_note": "Approximate HiRISE observation footprints for context only. Bounds are simplified rectangles around published centres, not exact PDS footprint polygons. Resolution is ~25–50 cm/pixel — far finer than this planning grid.",
+  "footprints": [
+    {
+      "id": "ESP_073912_1985",
+      "name": "Perseverance landing site (HiRISE)",
+      "obsId": "ESP_073912_1985",
+      "url": "https://www.uahirise.org/ESP_073912_1985",
+      "centreLat": 18.462,
+      "centreLon": 77.392,
+      "west": 77.34,
+      "east": 77.45,
+      "south": 18.40,
+      "north": 18.52,
+      "note": "Covers Octavia E. Butler Landing and nearby delta approach."
+    },
+    {
+      "id": "ESP_delta",
+      "name": "Western delta region (HiRISE context)",
+      "obsId": "representative delta coverage",
+      "url": "https://www.uahirise.org/",
+      "centreLat": 18.46,
+      "centreLon": 77.36,
+      "west": 77.28,
+      "east": 77.42,
+      "south": 18.40,
+      "north": 18.52,
+      "note": "Approximate box over the western delta deposit for high-res surface context."
+    },
+    {
+      "id": "ESP_crater_floor",
+      "name": "Jezero floor survey (HiRISE context)",
+      "obsId": "representative floor coverage",
+      "url": "https://www.uahirise.org/",
+      "centreLat": 18.40,
+      "centreLon": 77.65,
+      "west": 77.55,
+      "east": 77.78,
+      "south": 18.32,
+      "north": 18.48,
+      "note": "Approximate box near crater interior for boulder-scale context before a science stop."
+    }
+  ]
+}

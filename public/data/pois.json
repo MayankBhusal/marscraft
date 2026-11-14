@@ -1,0 +1,71 @@
+{
+  "_note": "Curated from published literature and NASA mission documentation. Coordinates are approximate (about 0.05 deg) and must be checked against the IAU Gazetteer of Planetary Nomenclature or the cited papers before scientific use. No measurement values are stored here: 'observations' describes what the cited work reports, in words.",
+  "pois": [
+    {
+      "id": "jezero-crater",
+      "name": "Jezero crater (interior, approx. centre)",
+      "lat": 18.4,
+      "lon": 77.7,
+      "category": "Ancient lake basin",
+      "status": "Mission target (Mars 2020 / Perseverance); well documented",
+      "summary": "Impact crater with an inlet valley and an outlet channel, interpreted as having held an open-basin lake in the past.",
+      "observations": "Orbital spectroscopy (CRISM) reported clay-bearing and carbonate-bearing deposits in and around the crater. Orbital imagery shows a fan-shaped delta deposit at the western inlet.",
+      "mission": "Mars Reconnaissance Orbiter (CRISM, HiRISE, CTX); Mars 2020 surface mission",
+      "source": "Ehlmann et al. 2008, Science 322 (Nili Fossae and Jezero mineralogy); Goudge et al. 2015, JGR Planets (Jezero stratigraphy and mineralogy); NASA Mars 2020 mission documentation",
+      "uncertainty": "Interpretation of an ancient lake is a scientific inference from orbital geomorphology and spectra, not a direct observation of water. Coordinates approximate."
+    },
+    {
+      "id": "perseverance-landing",
+      "name": "Perseverance landing site (Octavia E. Butler Landing)",
+      "lat": 18.44,
+      "lon": 77.45,
+      "category": "Landing site",
+      "status": "Mission landing site",
+      "summary": "Where the Perseverance rover landed in February 2021, within Jezero crater near the western delta.",
+      "observations": "Surface mission; in-situ results are published by the Mars 2020 science team and are not reproduced here.",
+      "mission": "Mars 2020 / Perseverance",
+      "source": "NASA Mars 2020 mission documentation",
+      "uncertainty": "Coordinates approximate to this tool's resolution. Not a route-safety endorsement.",
+      "pov": {
+        "title": "Landing site context (HiRISE)",
+        "caption": "Orbital view of Octavia E. Butler Landing (star). Context for the habitat proxy, not a suit camera frame.",
+        "credit": "NASA/JPL-Caltech/University of Arizona (PIA24483)",
+        "url": "data/pov/landing_hirise_context.jpg",
+        "sourceUrl": "https://photojournal.jpl.nasa.gov/catalog/PIA24483"
+      }
+    },
+    {
+      "id": "jezero-delta",
+      "name": "Jezero western delta deposit (approx.)",
+      "lat": 18.46,
+      "lon": 77.36,
+      "category": "Delta / layered deposits",
+      "status": "Mission target; well documented",
+      "summary": "Fan-shaped sedimentary deposit at the western inlet of Jezero crater, interpreted as a delta built into a lake.",
+      "observations": "Orbital imagery shows layered, fan-shaped morphology. Carbonate and clay signatures were reported nearby from CRISM.",
+      "mission": "Mars Reconnaissance Orbiter (HiRISE, CTX, CRISM); Mars 2020",
+      "source": "Goudge et al. 2015, JGR Planets; Ehlmann et al. 2008, Science 322",
+      "uncertainty": "Centre point of an extended feature; approximate. Delta origin is an interpretation.",
+      "pov": {
+        "title": "Delta remnant from near the landing site (Mastcam-Z)",
+        "caption": "Perseverance view toward the western delta deposit ~2.3 km west of the landing site (sol ~4). Approximate \u201cwhat you will see\u201d on the way to the science stop.",
+        "credit": "NASA/JPL-Caltech/ASU/MSSS (PIA24485)",
+        "url": "data/pov/delta_from_landing_mastcam.jpg",
+        "sourceUrl": "https://photojournal.jpl.nasa.gov/catalog/PIA24485"
+      }
+    },
+    {
+      "id": "nili-fossae",
+      "name": "Nili Fossae trough system (approx. centre of study area)",
+      "lat": 21.0,
+      "lon": 74.5,
+      "category": "Mineralogical observation (olivine, carbonate, clays)",
+      "status": "Candidate research target; mineral detections published",
+      "summary": "Set of graben west of Jezero where orbital spectrometers detected a diverse mineral suite including olivine, Fe/Mg clays and carbonate.",
+      "observations": "Published orbital detections (TES olivine; CRISM carbonate and phyllosilicates). Extent is regional, not a single point.",
+      "mission": "Mars Global Surveyor (TES); Mars Reconnaissance Orbiter (CRISM)",
+      "source": "Hoefen et al. 2003, Science 302 (olivine); Ehlmann et al. 2008, Science 322 (carbonate)",
+      "uncertainty": "Point marks a region, not a sampling location. Mineral identifications come from spectral interpretation of orbital data."
+    }
+  ]
+}

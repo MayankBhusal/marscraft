@@ -1,0 +1,307 @@
+{
+  "experiment": "MarsCraft DEM slope-resolution analysis",
+  "total_compared_cells": 242064,
+  "confusion_matrix": {
+    "row_definition": "Fine-resolution median class",
+    "column_definition": "Coarse-resolution class",
+    "class_order": [
+      "low",
+      "moderate",
+      "high"
+    ],
+    "counts": {
+      "low": {
+        "low": 167108,
+        "moderate": 2603,
+        "high": 0
+      },
+      "moderate": {
+        "low": 17992,
+        "moderate": 45850,
+        "high": 248
+      },
+      "high": {
+        "low": 13,
+        "moderate": 3307,
+        "high": 4943
+      }
+    }
+  },
+  "class_transitions": {
+    "low -> low": 167108,
+    "moderate -> moderate": 45850,
+    "moderate -> low": 17992,
+    "low -> moderate": 2603,
+    "high -> high": 4943,
+    "high -> moderate": 3307,
+    "moderate -> high": 248,
+    "high -> low": 13
+  },
+  "threshold_crossings": {
+    "5": {
+      "threshold_degrees": 5,
+      "fine_at_or_above_count": 72353,
+      "coarse_below_count": 185113,
+      "fine_at_or_above_but_coarse_below_count": 18005,
+      "percent_of_all_cells": 7.4381155396919825,
+      "percent_of_fine_at_or_above": 24.884939117935676
+    },
+    "15": {
+      "threshold_degrees": 15,
+      "fine_at_or_above_count": 8263,
+      "coarse_below_count": 236873,
+      "fine_at_or_above_but_coarse_below_count": 3320,
+      "percent_of_all_cells": 1.3715381056249587,
+      "percent_of_fine_at_or_above": 40.179111702771394
+    }
+  },
+  "slope_difference_statistics": {
+    "coarse_minus_fine_median_deg": {
+      "count": 242064,
+      "mean": -0.7754449554066167,
+      "median": -0.5612196326255798,
+      "p90": 0.35345952510833745,
+      "p95": 0.7105216324329384,
+      "maximum": 9.181439399719238
+    },
+    "coarse_minus_fine_p90_deg": {
+      "count": 242064,
+      "mean": -1.9071038092607828,
+      "median": -1.469416618347168,
+      "p90": -0.3717612981796264,
+      "p95": -0.1675248473882674,
+      "maximum": 4.578826904296875
+    },
+    "coarse_minus_fine_max_deg": {
+      "count": 242064,
+      "mean": -2.2592487754779653,
+      "median": -1.7625393867492676,
+      "p90": -0.5493658185005188,
+      "p95": -0.33211299180984494,
+      "maximum": 3.085812568664551
+    }
+  },
+  "largest_20_discrepancies": [
+    {
+      "row": 59,
+      "col": 474,
+      "fine_median_deg": 21.591337203979492,
+      "coarse_slope_deg": 1.8408541679382324,
+      "difference_deg": -19.7504825592041,
+      "fine_p90_deg": 22.76837921142578,
+      "fine_max_deg": 22.87034034729004,
+      "fine_class": "high",
+      "coarse_class": "low"
+    },
+    {
+      "row": 113,
+      "col": 393,
+      "fine_median_deg": 21.909761428833008,
+      "coarse_slope_deg": 4.965150833129883,
+      "difference_deg": -16.944610595703125,
+      "fine_p90_deg": 23.829622268676758,
+      "fine_max_deg": 24.689119338989258,
+      "fine_class": "high",
+      "coarse_class": "low"
+    },
+    {
+      "row": 235,
+      "col": 352,
+      "fine_median_deg": 23.19499397277832,
+      "coarse_slope_deg": 7.104062080383301,
+      "difference_deg": -16.090930938720703,
+      "fine_p90_deg": 24.99518585205078,
+      "fine_max_deg": 26.72867774963379,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 113,
+      "col": 392,
+      "fine_median_deg": 23.658580780029297,
+      "coarse_slope_deg": 8.247807502746582,
+      "difference_deg": -15.410773277282715,
+      "fine_p90_deg": 28.067277908325195,
+      "fine_max_deg": 29.24957847595215,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 454,
+      "col": 360,
+      "fine_median_deg": 21.33376693725586,
+      "coarse_slope_deg": 6.00575065612793,
+      "difference_deg": -15.32801628112793,
+      "fine_p90_deg": 24.330556869506836,
+      "fine_max_deg": 25.3972110748291,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 113,
+      "col": 394,
+      "fine_median_deg": 23.76511001586914,
+      "coarse_slope_deg": 8.703985214233398,
+      "difference_deg": -15.061124801635742,
+      "fine_p90_deg": 25.182003021240234,
+      "fine_max_deg": 26.537818908691406,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 144,
+      "col": 204,
+      "fine_median_deg": 24.737455368041992,
+      "coarse_slope_deg": 10.194585800170898,
+      "difference_deg": -14.542869567871094,
+      "fine_p90_deg": 28.16121482849121,
+      "fine_max_deg": 29.194211959838867,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 3,
+      "col": 339,
+      "fine_median_deg": 21.97582244873047,
+      "coarse_slope_deg": 7.611546993255615,
+      "difference_deg": -14.364274978637695,
+      "fine_p90_deg": 22.768831253051758,
+      "fine_max_deg": 23.393449783325195,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 59,
+      "col": 473,
+      "fine_median_deg": 16.02186393737793,
+      "coarse_slope_deg": 1.6670933961868286,
+      "difference_deg": -14.35477066040039,
+      "fine_p90_deg": 24.412288665771484,
+      "fine_max_deg": 25.316875457763672,
+      "fine_class": "high",
+      "coarse_class": "low"
+    },
+    {
+      "row": 112,
+      "col": 393,
+      "fine_median_deg": 23.437122344970703,
+      "coarse_slope_deg": 9.178324699401855,
+      "difference_deg": -14.258797645568848,
+      "fine_p90_deg": 27.53508949279785,
+      "fine_max_deg": 27.666282653808594,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 166,
+      "col": 167,
+      "fine_median_deg": 17.930850982666016,
+      "coarse_slope_deg": 3.6991891860961914,
+      "difference_deg": -14.231661796569824,
+      "fine_p90_deg": 19.627851486206055,
+      "fine_max_deg": 20.255083084106445,
+      "fine_class": "high",
+      "coarse_class": "low"
+    },
+    {
+      "row": 59,
+      "col": 472,
+      "fine_median_deg": 21.716981887817383,
+      "coarse_slope_deg": 7.65015983581543,
+      "difference_deg": -14.066822052001953,
+      "fine_p90_deg": 28.505224227905273,
+      "fine_max_deg": 29.429521560668945,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 340,
+      "col": 97,
+      "fine_median_deg": 25.581012725830078,
+      "coarse_slope_deg": 11.553967475891113,
+      "difference_deg": -14.027045249938965,
+      "fine_p90_deg": 26.108610153198242,
+      "fine_max_deg": 26.6456241607666,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 454,
+      "col": 359,
+      "fine_median_deg": 22.646854400634766,
+      "coarse_slope_deg": 8.839594841003418,
+      "difference_deg": -13.807259559631348,
+      "fine_p90_deg": 25.361658096313477,
+      "fine_max_deg": 25.62282371520996,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 114,
+      "col": 393,
+      "fine_median_deg": 24.613723754882812,
+      "coarse_slope_deg": 11.046751976013184,
+      "difference_deg": -13.566971778869629,
+      "fine_p90_deg": 28.012292861938477,
+      "fine_max_deg": 28.16365623474121,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 79,
+      "col": 156,
+      "fine_median_deg": 24.468910217285156,
+      "coarse_slope_deg": 10.937512397766113,
+      "difference_deg": -13.531397819519043,
+      "fine_p90_deg": 31.732139587402344,
+      "fine_max_deg": 32.542503356933594,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 300,
+      "col": 353,
+      "fine_median_deg": 36.62904357910156,
+      "coarse_slope_deg": 23.226594924926758,
+      "difference_deg": -13.402448654174805,
+      "fine_p90_deg": 40.79381561279297,
+      "fine_max_deg": 40.87930679321289,
+      "fine_class": "high",
+      "coarse_class": "high"
+    },
+    {
+      "row": 236,
+      "col": 351,
+      "fine_median_deg": 20.849271774291992,
+      "coarse_slope_deg": 7.487672805786133,
+      "difference_deg": -13.36159896850586,
+      "fine_p90_deg": 23.43916893005371,
+      "fine_max_deg": 23.513324737548828,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 453,
+      "col": 361,
+      "fine_median_deg": 20.609573364257812,
+      "coarse_slope_deg": 7.2873921394348145,
+      "difference_deg": -13.322181701660156,
+      "fine_p90_deg": 22.221603393554688,
+      "fine_max_deg": 23.330013275146484,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    },
+    {
+      "row": 490,
+      "col": 158,
+      "fine_median_deg": 24.11446762084961,
+      "coarse_slope_deg": 10.830307960510254,
+      "difference_deg": -13.284159660339355,
+      "fine_p90_deg": 29.66924476623535,
+      "fine_max_deg": 30.093616485595703,
+      "fine_class": "high",
+      "coarse_class": "moderate"
+    }
+  ],
+  "interpretation_note": "Fine-resolution statistics and coarse-resolution slope values represent different spatial supports. These comparisons measure resolution sensitivity, not absolute accuracy against ground truth."
+}

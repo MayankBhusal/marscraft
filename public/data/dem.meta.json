@@ -1,0 +1,24 @@
+{
+  "id": "mola-hrsc-blend-200m-crop",
+  "title": "HRSC+MOLA blended DEM v2, block-averaged crop",
+  "synthetic": false,
+  "source": "USGS Astrogeology; MOLA (Mars Global Surveyor, NASA) blended with HRSC (Mars Express, ESA). Fergason, Hare & Laura (2018).",
+  "sourceUrl": "https://astrogeology.usgs.gov/search/map/mars_mgs_mola_mex_hrsc_blended_dem_global_200m",
+  "radiusM": 3396190.0,
+  "rows": 494,
+  "cols": 494,
+  "west": 73.9970678889932,
+  "north": 22.001342900091927,
+  "dLon": 0.010122362491923,
+  "dLat": 0.010122362491923,
+  "elevationUnit": "m",
+  "processing": [
+    "Requested bbox W74.0 E79.0 S17.0 N22.0 deg.",
+    "Actual aligned origin: W73.997067888993, N22.001342900092."
+  ],
+  "limitations": [
+    "Blended product: USGS notes the HRSC-on-MOLA blend did not always work well; use care for scientific analysis.",
+    "Averaging smooths relief, so slopes computed from this grid underestimate local steepness at the 200 m scale.",
+    "Elevation is relative to the Mars datum used by the product, not a measured terrain-height uncertainty."
+  ]
+}
