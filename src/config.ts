@@ -18,25 +18,59 @@ export interface TrekLayer {
   maxNativeZoom: number;
   /** Brief science context shown in the UI. */
   note: string;
+  /** Coverage from the layer's WMTS capabilities; tiles outside it are not requested. */
+  bounds?: { west: number; east: number; south: number; north: number };
 }
 
-/** Viking optical basemap (default). */
+/** Viking optical basemap (default). The service publishes tile matrices 0-7 only. */
 export const BASEMAP: TrekLayer = {
   id: "viking",
   name: "Viking MDIM 2.1 color mosaic",
-  attribution: "Imagery: NASA/JPL/USGS Viking MDIM 2.1 via NASA Mars Trek",
+  attribution: "Viking MDIM 2.1: NASA/JPL/USGS",
   url: "https://trek.nasa.gov/tiles/Mars/EQ/Mars_Viking_MDIM21_ClrMosaic_global_232m/1.0.0/default/default028mm/{z}/{y}/{x}.jpg",
   zoomOffset: 0,
   minZoom: 1,
-  maxNativeZoom: 8,
+  maxNativeZoom: 7,
   note: "Optical surface context (visible wavelengths).",
 };
+
+/**
+ * Controlled CTX orthomosaic of Jezero (about 6 m/pixel), produced by USGS
+ * Astrogeology for Mars 2020 Terrain Relative Navigation.
+ */
+export const CTX_JEZERO: TrekLayer = {
+  id: "ctx-jezero",
+  name: "CTX orthomosaic, Jezero (6 m)",
+  attribution: "CTX: NASA/JPL-Caltech/MSSS/USGS",
+  url: "https://trek.nasa.gov/tiles/Mars/EQ/JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0/1.0.0/default/default028mm/{z}/{y}/{x}.png",
+  zoomOffset: 0,
+  minZoom: 1,
+  maxNativeZoom: 13,
+  note: "Visible imagery at about 6 m/pixel: scarps, dune fields and craters at traverse scale.",
+  bounds: { west: 77.1604655, east: 77.6991776, south: 18.2110274, north: 18.7211945 },
+};
+
+/** Controlled HiRISE orthomosaic of Jezero (about 25 cm/pixel), same USGS product family. */
+export const HIRISE_JEZERO: TrekLayer = {
+  id: "hirise-jezero",
+  name: "HiRISE orthomosaic, Jezero (25 cm)",
+  attribution: "HiRISE: NASA/JPL-Caltech/UArizona/USGS",
+  url: "https://trek.nasa.gov/tiles/Mars/EQ/JEZ_hirise_soc_006_orthoMosaic_25cm_Eqc_latTs0_lon0_first_dd/1.0.0/default/default028mm/{z}/{y}/{x}.png",
+  zoomOffset: 0,
+  minZoom: 1,
+  maxNativeZoom: 17,
+  note: "Visible imagery at about 25 cm/pixel: individual boulders and outcrops.",
+  bounds: { west: 77.2229331, east: 77.583964, south: 18.3067994, north: 18.669315 },
+};
+
+/** THEMIS infrared is drawn at this opacity when it sits over the high-resolution imagery. */
+export const THERMAL_BLEND_OPACITY = 0.55;
 
 /** THEMIS daytime infrared — thermal. */
 export const THEMIS_DAY: TrekLayer = {
   id: "themis-day",
   name: "THEMIS Day IR (100 m controlled mosaic)",
-  attribution: "Thermal: NASA/JPL/ASU THEMIS Day IR controlled mosaic via NASA Mars Trek",
+  attribution: "THEMIS: NASA/JPL-Caltech/ASU",
   url: "https://trek.nasa.gov/tiles/Mars/EQ/THEMIS_DayIR_ControlledMosaics_100m_v2_oct2018/1.0.0/default/default028mm/{z}/{y}/{x}.png",
   zoomOffset: 0,
   minZoom: 1,
@@ -48,7 +82,7 @@ export const THEMIS_DAY: TrekLayer = {
 export const THEMIS_NIGHT: TrekLayer = {
   id: "themis-night",
   name: "THEMIS Night IR (100 m controlled mosaic)",
-  attribution: "Thermal: NASA/JPL/ASU THEMIS Night IR controlled mosaic via NASA Mars Trek",
+  attribution: "THEMIS: NASA/JPL-Caltech/ASU",
   url: "https://trek.nasa.gov/tiles/Mars/EQ/THEMIS_NightIR_ControlledMosaics_100m_v2_oct2018/1.0.0/default/default028mm/{z}/{y}/{x}.png",
   zoomOffset: 0,
   minZoom: 1,
@@ -63,7 +97,7 @@ export const THEMIS_NIGHT: TrekLayer = {
 export const CRISM_MINERALS = {
   id: "crism-minerals",
   name: "CRISM mineral signatures (Jezero)",
-  attribution: "Minerals: NASA/JPL-Caltech/MSSS/JHU-APL/Purdue/USGS (PIA23380)",
+  attribution: "CRISM: NASA/JPL-Caltech/MSSS/JHU-APL/Purdue/USGS (PIA23380)",
   url: "data/crism_jezero_minerals.png",
   bounds: {
     // Tightened to Jezero crater + western delta / rim (approx.).
@@ -79,6 +113,22 @@ export const CRISM_MINERALS = {
 export const MARS_RADIUS_M = 3396190;
 export const POI_CORRIDOR_KM = 3;
 export const DEFAULT_SPEED_KMH = 2;
+
+/** Opening map view: Jezero crater, its western delta and the rover traverse. */
+export const JEZERO_VIEW = { west: 77.12, east: 77.98, south: 18.05, north: 18.78 } as const;
+/** Latitude used for day length when no start point is set (Octavia E. Butler Landing). */
+export const DEFAULT_SITE_LAT = 18.44;
+/** A rover stop is offered as ground truth when it lies within this distance of the selected cell centre. */
+export const ROVER_NEAR_M = 1000;
+
+/** Challenge-supplied references. A link here does not mean the data are integrated; see DATA_SOURCES.md. */
+export const CHALLENGE_RESOURCES = [
+  { name: "JPL Mars Trek", url: "https://trek.nasa.gov/mars/", use: "Serves the Viking, THEMIS, CTX and HiRISE imagery." },
+  { name: "USGS-NASA Planetary Geologic Mapping", url: "https://astrogeology-usgs.hub.arcgis.com/pages/interactive-maps-mars", use: "Reference only; geologic units are not integrated." },
+  { name: "Curiosity's proposed path up Mount Sharp", url: "https://science.nasa.gov/resource/curiositys-proposed-path-up-mount-sharp/", use: "Route-map inspiration (different region)." },
+  { name: "Perseverance raw images", url: "https://mars.nasa.gov/mars2020/multimedia/raw-images/", use: "Navcam frames are queried for rover stops near a selected point." },
+  { name: "NASA Worldview", url: "https://worldview.earthdata.nasa.gov/", use: "Earth viewer; layered-map inspiration only." },
+] as const;
 
 /**
  * Safety context shown in the UI. These are published order-of-magnitude
@@ -99,17 +149,19 @@ export const SAFETY = {
     "Curiosity RAD at Gale: ~0.21 mGy/day absorbed GCR, ~0.64 mSv/day dose equivalent (Hassler et al. 2014). Not measured at Jezero; quiet-sun order of magnitude only.",
   /** Short note on solar particle events. */
   speNote:
-    "Solar particle events can raise dose rates by orders of magnitude for hours to days. No real-time SPE forecast is included in this tool.",
+    "Solar particle events can raise dose rates by orders of magnitude for hours to days. This tool lists predicted CME arrivals at Mars but does not forecast particle dose.",
   /** What the planner does and does not model. */
   modelled: [
     "Elevation and derived slope from the working DEM",
     "Missing data treated as unknown (never assumed safe)",
     "Route cost profiles that penalise or exclude steep / unknown cells",
+    "Day length for the EVA site and date (geometric)",
+    "Predicted CME arrivals at Mars from NASA DONKI (model output)",
   ],
   notModelled: [
     "Surface roughness, rock abundance, or soil strength",
-    "Illumination, shadows, or thermal extremes on the suit",
-    "Line-of-sight, dust, or suit mobility limits",
-    "Real-time radiation or space-weather alerts",
+    "Terrain shadowing, dust opacity, or thermal load on the suit",
+    "Line-of-sight, communications, or suit mobility limits",
+    "Radiation dose during a solar particle event",
   ],
 } as const;

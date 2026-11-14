@@ -77,7 +77,7 @@ Points come from `public/data/pois.json`, curated from the literature cited in e
 ## Assumptions and limits
 
 - The grid resolution (about 590 m per cell by default) cannot resolve boulders, small craters or dunes that govern real traversability.
-- No roughness, rock abundance, soil strength, thermal or illumination data are used.
+- No roughness, rock abundance, soil strength, thermal or illumination data enter the route cost. The CTX, HiRISE, THEMIS and CRISM layers are visual context for the crew, and rover tilt is reported as a check, not used to reroute.
 - Terrain shown while `synthetic: true` is generated and meaningless for the real surface.
 
 
@@ -126,9 +126,73 @@ The working resolution is retained for the regional demonstration, with the limi
 
 The Safety panel shows galactic cosmic ray (GCR) figures from Curiosity RAD at Gale crater (Hassler et al. 2014): about **0.21 mGy/day absorbed dose** and about **0.64 mSv/day dose equivalent**. These are quiet-sun order-of-magnitude values for crew awareness. They are **not** Jezero measurements and are **not** operational limits. Do not label the absorbed-dose number as mSv.
 
-Solar particle events (SPEs) can raise dose rates by orders of magnitude for hours to days. MarsCraft does **not** ingest space-weather forecasts or SPE alerts. The UI states that gap explicitly.
+Solar particle events (SPEs) can raise dose rates by orders of magnitude for hours to days. MarsCraft lists CME arrivals at Mars predicted by the WSA-ENLIL model (next section) but does **not** forecast particle flux or dose. The UI states that gap explicitly.
+
+For an active route the planner also reports the dose equivalent for the planned EVA as `0.64 mSv/day × EVA hours / 24`. This is a linear scaling of the Gale quiet-sun rate, shown as an order of magnitude.
 
 These numbers are for crew awareness in a planning tool. They are not medical limits, EVA stay-time rules, or operational constraints.
+
+## Season and day length (computed)
+
+Today's areocentric solar longitude L<sub>s</sub> is computed from the system clock with the Mars24 algorithm (Allison & McEwen 2000, *Planetary and Space Science* 48, 215–235), omitting the planetary perturbation terms, whose combined effect is under 0.1°:
+
+```
+d   = days since J2000 (Terrestrial Time)
+M   = 19.3871 + 0.52402073 d                         (mean anomaly, deg)
+aFMS= 270.3871 + 0.524038496 d                       (fictitious mean sun, deg)
+v-M = (10.691 + 3e-7 d) sin M + 0.623 sin 2M + 0.050 sin 3M + 0.005 sin 4M + 0.0005 sin 5M
+Ls  = aFMS + (v - M)
+```
+
+Day length follows from the solar declination `δ = asin(sin 25.19° · sin Ls)` and the site latitude `φ`: `cos H = −tan φ · tan δ`, daylight `= 2H / 15°` Mars hours. One Mars hour is 1/24 sol, or 1.0275 Earth hours (sol = 88,775.244 s). The latitude is the EVA start point, or the landing site when none is set.
+
+This is flat-horizon geometry. It ignores refraction, dust opacity and, importantly inside a crater, shadowing by the rim and delta scarp, so usable light is shorter than the figure shown.
+
+**Check against NASA data.** `src/core/conditions.test.ts` compares both quantities with the Mars 2020 MEDA feed for every sol in the bundled snapshot: computed L<sub>s</sub> is within 1° of the feed's value and gives the same season name, and computed day length at 18.44° N is within 3 minutes of the feed's sunset minus sunrise. It also checks the Mars Year 37 northern spring equinox (2022-12-26).
+
+## Space weather assessment
+
+`https://api.nasa.gov/DONKI/WSAEnlilSimulations` returns WSA-ENLIL+Cone runs for the last 30 days. Each run lists the CMEs it modelled and an `impactList` of locations with predicted arrival times; MarsCraft keeps the entries for Mars.
+
+- **De-duplication.** CCMC re-runs the model as CME measurements are refined. Runs are grouped by the set of CME identifiers they model and only the run with the latest completion time is kept.
+- **Level.** With `t` the predicted arrival relative to now: **Alert** if a non-minor arrival has `|t| ≤ 24 h`; **Watch** if any arrival is within 24 h (minor only), between 24 h and 7 days ahead, or between 24 h and 72 h past; otherwise **Quiet**.
+- **Staleness.** If the data came from the bundled snapshot and is more than 24 h old, a Quiet reading is reported as **Unknown**. Listed arrivals still count, since a prediction made earlier remains a prediction.
+
+The windows are planning assumptions. Reported arrival-time errors for this model at Earth average roughly ten hours (Wold et al. 2018, *J. Space Weather Space Clim.* 8, A17), which is why the alert window is a full day either side. A predicted arrival indicates a disturbed interplanetary environment that can come with enhanced energetic particles; it is not a dose estimate, and absence of a prediction is not a guarantee of low radiation.
+
+## Pre-EVA planning checks
+
+For the active route the planner evaluates six checks. Each is **pass**, **caution**, **flagged** or **unknown**; an input that is missing or too old yields unknown, never pass. Thresholds are named constants in `src/core/conditions.ts`.
+
+| Check | Pass | Caution | Flagged | Unknown |
+|---|---|---|---|---|
+| EVA time budget | walk + science leaves ≥ 10% of the scenario budget | under 10% in hand | over budget | no scenario budget set |
+| Daylight window | EVA fits with ≥ 1 h of daylight in hand | under 1 h in hand | EVA longer than daylight | day length unavailable |
+| Space weather | Quiet, data under 24 h old | Watch | Alert | no data, or Quiet from old data |
+| Slope on route | no high-slope cells | some length on high-slope cells | – | no slope computable |
+| Rover ground truth | rover stops in the route's cells, tilt < 15° | rover tilt ≥ 15° in a route cell | – | no rover stops in the route's cells |
+| Terrain data gaps | ≤ 5% of length has unknown slope | > 5% | – | – |
+
+The daylight check assumes egress at sunrise, which is the most favourable case. The checks are planning aids built on the assumptions in this document. They are not flight rules, and a full set of passes does not certify a route.
+
+## In-situ cross-check against Perseverance
+
+`scripts/validate_rover_ground_truth.mjs` compares the working DEM with the rover's 554 end-of-drive localizations to sol 2022 (results in `validation/rover_ground_truth.json`). The rover values are measured on the surface and are independent of the orbital DEM. The stops fall in 53 grid cells.
+
+**Elevation (grid minus rover):** mean +9.8 m, median +7.9 m, mean absolute 20.0 m, 90th-percentile absolute 43.2 m, maximum 101.4 m, RMSE 27.0 m. For cells about 590 m across on a crater floor and delta with tens of metres of relief inside a cell, this agreement indicates that the grid is correctly georeferenced and on the same vertical datum as the rover's areoid-referenced elevations.
+
+**Slope (rover tilt against grid slope at the same stops):**
+
+| | Mean | Median | 90th pct | Max |
+|---|---|---|---|---|
+| Rover tilt | 7.59° | 7.10° | 14.90° | 20.7° |
+| Grid slope | 3.72° | 2.30° | 9.88° | 13.0° |
+
+Rover tilt exceeded the grid slope at 80.1% of stops. The rover was tilted 15° or more at 52 stops; none of those stops lies in a grid cell classed as high slope.
+
+The two quantities are not the same thing. Tilt is the attitude of a three-metre vehicle and responds to rocks and ripples under its wheels; grid slope is a gradient across cells hundreds of metres wide. The comparison does not show the DEM to be wrong. It shows, with surface measurements, how much walking-scale relief the working grid averages away, and that the grid's high-slope class did not anticipate the places where the rover sat steepest. This is why the planner reports rover tilt as its own check rather than folding it into slope, and why "no high-slope cells" must not be read as "gentle ground".
+
+The rover also chose its own path to avoid hazards, so its stops under-sample the worst terrain.
 
 
 ## EVA budget check

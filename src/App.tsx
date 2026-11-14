@@ -1,27 +1,49 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import MapView, { ROUTE_COLORS, RouteLine } from "./MapView";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import MapView, { ROUTE_COLORS, RouteLine, TRAVERSE_COLOR } from "./MapView";
 import { Grid, loadGrid } from "./core/grid";
-import { CLASS_COLOR, CLASS_LABEL, SLOPE_THRESHOLDS, TerrainClass, classify, computeSlope, elevationRange } from "./core/terrain";
+import { CLASS_COLOR, CLASS_LABEL, TerrainClass, classify, computeSlope, elevationRange } from "./core/terrain";
 import { ELEV_RAMP, SLOPE_MAX_DEG, SLOPE_RAMP, cssRamp, staticTerrainUrls, reachabilityImage } from "./core/render";
 import { PROFILES, PlannedRoute, ProfileId, explain, planRoutes, distanceField, walkBackRadiusM } from "./core/route";
-import { BASEMAP, THEMIS_DAY, THEMIS_NIGHT, CRISM_MINERALS, DEFAULT_SPEED_KMH, POI_CORRIDOR_KM, SAFETY } from "./config";
+import { assessSpaceWeather, evaChecks, marsArrivals, parseMeda, summarizeMeda, SW_FRESH_HOURS } from "./core/conditions";
+import { daylightMarsHours, marsHoursToEarthHours, seasonName, solarLongitudeDeg } from "./core/marstime";
+import { RoverTraverse, nearestStop, roverOnPath } from "./core/rover";
+import { BASEMAP, DEFAULT_SITE_LAT, DEFAULT_SPEED_KMH, JEZERO_VIEW, POI_CORRIDOR_KM, ROVER_NEAR_M, SAFETY, THERMAL_BLEND_OPACITY } from "./config";
 import { DELTA_MARGIN_EVA, MissionScenario } from "./mission";
+import { loadMeda, loadRoverTraverse, loadSpaceWeather } from "./nasa";
+import { ConditionsPanel, DataInventoryPanel, EvaChecksList, LEVEL_LABEL, Loadable, MedaState, RoverGroundTruth, WeatherState } from "./panels";
 import { HiriseFootprint, LayerState, LonLat, PoiFull } from "./types";
-import { ElevationProfile, Panel } from "./ui";
+import { ElevationProfile, Panel, ProfileMark } from "./ui";
 
 const f = (v: number | null | undefined, d = 1) => (v == null || Number.isNaN(v) ? "n/a" : v.toFixed(d));
 const coord = (p: LonLat) => `${p.lat.toFixed(4)} N, ${p.lon.toFixed(4)} E`;
-type Workspace = "overview" | "explorer" | "planner";
+
+const WORKSPACES = ["overview", "explorer", "planner"] as const;
+type Workspace = (typeof WORKSPACES)[number];
+const WORKSPACE_TITLE: Record<Workspace, string> = { overview: "Mission overview", explorer: "Mars explorer", planner: "Mission planner" };
+
+/** Workspace named by the URL hash (#/planner), so views can be linked, reloaded and stepped through with Back. */
+function workspaceFromHash(): Workspace | null {
+  const name = window.location.hash.replace(/^#\/?/, "");
+  return (WORKSPACES as readonly string[]).includes(name) ? (name as Workspace) : null;
+}
+
+type FitTarget = "route" | "region" | "jezero" | LonLat;
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export default function App() {
   const [grid, setGrid] = useState<Grid | null>(null);
-  const [workspace, setWorkspace] = useState<Workspace>("overview");
+  const [workspace, setWorkspace] = useState<Workspace>(() => workspaceFromHash() ?? "overview");
   const [error, setError] = useState<string | null>(null);
   const [resourceErrors, setResourceErrors] = useState<string[]>([]);
   const [pois, setPois] = useState<PoiFull[]>([]);
   const [hirise, setHirise] = useState<HiriseFootprint[]>([]);
-  const [layers, setLayers] = useState<LayerState>({ basemap: true, themisDay: false, themisNight: false, minerals: false, hirise: false, elevation: true, slope: false, terrainClass: true, reachability: false, poi: true, routes: true });
-  const [opacity, setOpacity] = useState(0.65);
+  const [traverse, setTraverse] = useState<RoverTraverse | null>(null);
+  const [meda, setMeda] = useState<Loadable<MedaState>>({ state: "loading" });
+  const [weather, setWeather] = useState<Loadable<WeatherState>>({ state: "loading" });
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [layers, setLayers] = useState<LayerState>({ basemap: true, ctx: true, hiriseMosaic: false, themisDay: false, themisNight: false, minerals: false, hirise: false, traverse: true, elevation: false, slope: false, terrainClass: true, reachability: false, poi: true, routes: true });
+  const [opacity, setOpacity] = useState(0.45);
   const [basemap, setBasemap] = useState<"loading" | "ok" | "error">("loading");
   const [hover, setHover] = useState<LonLat | null>(null);
   const [selected, setSelected] = useState<LonLat | null>(null);
@@ -34,8 +56,53 @@ export default function App() {
   const [active, setActive] = useState<ProfileId | null>(null);
   const [scenario, setScenario] = useState<MissionScenario | null>(null);
   const [showProfile, setShowProfile] = useState(true);
-  const [fitSeq, setFitSeq] = useState(0);
+  const [fit, setFit] = useState<{ seq: number; target: FitTarget }>({ seq: 0, target: "jezero" });
+  const [scrubIdx, setScrubIdx] = useState<number | null>(null);
   const skipInvalidate = useRef(false);
+  const leftSide = useRef<HTMLElement>(null);
+  const rightSide = useRef<HTMLElement>(null);
+
+  const go = useCallback((w: Workspace) => {
+    if (workspaceFromHash() !== w) window.location.hash = `/${w}`;
+    setWorkspace(w);
+  }, []);
+
+  // Keep the workspace in step with the URL (Back / Forward, typed links) and with the 1-3 keys.
+  useEffect(() => {
+    const onHash = () => setWorkspace(workspaceFromHash() ?? "overview");
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (e.ctrlKey || e.metaKey || e.altKey || el?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el?.tagName ?? "")) return;
+      const w = WORKSPACES[Number(e.key) - 1];
+      if (w) go(w);
+    };
+    window.addEventListener("hashchange", onHash);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("hashchange", onHash);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [go]);
+
+  useEffect(() => {
+    document.title = `${WORKSPACE_TITLE[workspace]} · MarsCraft`;
+    leftSide.current?.scrollTo({ top: 0 });
+    rightSide.current?.scrollTo({ top: 0 });
+  }, [workspace]);
+
+  const refreshWeather = useCallback((force: boolean) => {
+    setWeather({ state: "loading" });
+    loadSpaceWeather(force).then(
+      (feed) => {
+        const now = Date.now();
+        const assessment = assessSpaceWeather(marsArrivals(feed.data.simulations), now);
+        const ageHours = Math.max(0, (now - feed.retrievedMs) / 3600000);
+        setNowMs(now);
+        setWeather({ state: "ready", value: { feed, assessment, ageHours, level: assessment.level === "quiet" && ageHours > SW_FRESH_HOURS ? "unknown" : assessment.level } });
+      },
+      (e) => setWeather({ state: "error", message: errorText(e) }),
+    );
+  }, []);
 
   useEffect(() => {
     loadGrid().then(setGrid).catch((e) => setError(String(e.message ?? e)));
@@ -70,8 +137,21 @@ export default function App() {
     };
     void loadPois();
     void loadHirise();
+    loadRoverTraverse().then((t) => { if (!cancelled) setTraverse(t); }, (e) => reportResourceError("Perseverance traverse", e));
+    loadMeda().then(
+      (feed) => {
+        if (cancelled) return;
+        try {
+          setMeda({ state: "ready", value: { feed, summary: summarizeMeda(parseMeda(feed.data), Date.now()) } });
+        } catch (e) {
+          setMeda({ state: "error", message: errorText(e) });
+        }
+      },
+      (e) => { if (!cancelled) setMeda({ state: "error", message: errorText(e) }); },
+    );
+    refreshWeather(false);
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshWeather]);
 
   const slope = useMemo(() => (grid ? computeSlope(grid) : null), [grid]);
   const range = useMemo(() => (grid ? elevationRange(grid) : [0, 1] as [number, number]), [grid]);
@@ -140,8 +220,59 @@ export default function App() {
     setActive(null);
   }, [start, end, wpIds]);
 
-  if (error) return <div style={{ padding: 20 }} className="err">{error}</div>;
-  if (!grid || !slope || !images || !stats) return <div style={{ padding: 20 }}>Loading elevation grid...</div>;
+  useEffect(() => setScrubIdx(null), [plan, active]);
+
+  const lines = useMemo<RouteLine[]>(
+    () => (!grid ? [] : (plan?.routes ?? []).map((r) => ({
+      profile: r.profile,
+      latlngs: r.path.map((c) => [grid.centerLat(c.r), grid.centerLon(c.c)] as [number, number]),
+    }))),
+    [grid, plan],
+  );
+
+  // Rover stop closest to the selected cell, offered as in-situ ground truth.
+  const nearRover = useMemo(
+    () => (traverse && selected && grid ? nearestStop(traverse.stops, selected.lon, selected.lat, grid.meta.radiusM, ROVER_NEAR_M) : null),
+    [traverse, selected, grid],
+  );
+  const roverMarker = useMemo(
+    () => (nearRover && layers.traverse ? { lon: nearRover.stop.lon, lat: nearRover.stop.lat, sol: nearRover.stop.sol } : null),
+    [nearRover, layers.traverse],
+  );
+  const traverseLabel = traverse
+    ? `Perseverance traverse · ${(traverse.totalDistanceM / 1000).toFixed(1)} km to sol ${traverse.lastSol}`
+    : "Perseverance traverse";
+
+  // Season and day length for today at the EVA start (or the landing site).
+  const siteLat = start?.lat ?? DEFAULT_SITE_LAT;
+  const sun = useMemo(() => {
+    const ls = solarLongitudeDeg(nowMs);
+    const marsH = daylightMarsHours(siteLat, ls);
+    return { ls, season: seasonName(ls, siteLat), marsH, earthH: marsHoursToEarthHours(marsH) };
+  }, [nowMs, siteLat]);
+
+  if (error) {
+    return (
+      <div className="boot">
+        <div className="boot-card">
+          <img src={`${import.meta.env.BASE_URL}marscraft-emblem.png`} alt="" />
+          <strong>MarsCraft could not start</strong>
+          <p className="err">{error}</p>
+        </div>
+      </div>
+    );
+  }
+  if (!grid || !slope || !images || !stats) {
+    return (
+      <div className="boot" role="status">
+        <div className="boot-card">
+          <img src={`${import.meta.env.BASE_URL}marscraft-emblem.png`} alt="" />
+          <strong>MarsCraft</strong>
+          <p>Loading the Jezero elevation grid…</p>
+        </div>
+      </div>
+    );
+  }
 
   const probe = (p: LonLat) => {
     const cell = grid.toCell(p.lon, p.lat);
@@ -164,6 +295,14 @@ export default function App() {
     setSelectedPoi(id);
     const poi = poiById(id);
     if (poi) setSelected({ lon: poi.lon, lat: poi.lat });
+  };
+  const requestFit = (target: FitTarget) => setFit((v) => ({ seq: v.seq + 1, target }));
+  /** Select a science target from a list and bring it into view. */
+  const focusPoi = (id: string) => {
+    const poi = poiById(id);
+    if (!poi) return;
+    handlePoi(id);
+    requestFit({ lon: poi.lon, lat: poi.lat });
   };
 
   const stopsReady = !!start && !!end;
@@ -192,7 +331,7 @@ export default function App() {
     if (!start || !end) return;
     runWith(start, end, wpIds, scenario?.preferredProfile ?? "balanced");
     setShowProfile(true);
-    requestAnimationFrame(() => setFitSeq((n) => n + 1));
+    requestFit("route");
   };
 
   /** Load the demonstration Marswalk: points, speed, brief, and planned routes. */
@@ -211,20 +350,67 @@ export default function App() {
     setSpeed(sc.speedKmh);
     setSelected(s);
     setSelectedPoi(sc.startPoiId);
-    // Enable science-relevant layers for the demo.
-    setLayers((L) => ({ ...L, minerals: true, hirise: true, terrainClass: true, poi: true, routes: true }));
+    // Layers for the scenario's science goal: mineral signatures over high-resolution
+    // imagery. The slope-class tint is left off because its green competes with the
+    // CRISM carbonate green; class along the route stays visible on the profile strip.
+    // Without Trek imagery the bundled slope class stays on so the map is never blank.
+    setLayers((L) => ({ ...L, ctx: true, minerals: true, traverse: true, terrainClass: basemap === "error", elevation: false, slope: false, poi: true, routes: true }));
     runWith(s, e, wps, sc.preferredProfile);
     setShowProfile(true);
-    // Fit after React commits the new route geometry.
-    requestAnimationFrame(() => setFitSeq((n) => n + 1));
+    requestFit("route");
+    // The comparison, checks and exports live in the planner.
+    go("planner");
   };
 
-  const lines: RouteLine[] = (plan?.routes ?? []).map((r) => ({
-    profile: r.profile,
-    latlngs: r.path.map((c) => [grid.centerLat(c.r), grid.centerLon(c.c)] as [number, number]),
-  }));
   const activeRoute = plan?.routes.find((r) => r.profile === active) ?? null;
   const synth = grid.meta.synthetic;
+  const cellKm = (grid.meta.dLat * Math.PI / 180 * grid.meta.radiusM) / 1000;
+  const weatherNow = weather.state === "ready" ? weather.value : null;
+  const medaNow = meda.state === "ready" ? meda.value.summary : null;
+
+  const cellLatLng = (c: { r: number; c: number }) => [grid.centerLat(c.r), grid.centerLon(c.c)] as [number, number];
+  const fitLatLngs: [number, number][] | undefined =
+    fit.target === "route" ? activeRoute?.path.map(cellLatLng)
+    : fit.target === "region" ? [[grid.south, grid.meta.west], [grid.meta.north, grid.east]]
+    : fit.target === "jezero" ? [[JEZERO_VIEW.south, JEZERO_VIEW.west], [JEZERO_VIEW.north, JEZERO_VIEW.east]]
+    : [[fit.target.lat, fit.target.lon]];
+
+  const scrubCell = scrubIdx == null ? null : activeRoute?.path[scrubIdx] ?? null;
+  const scrubPoint = scrubCell ? { lon: grid.centerLon(scrubCell.c), lat: grid.centerLat(scrubCell.r) } : null;
+
+  // Where each science stop falls along the active route, for the profile markers.
+  const profileMarks: ProfileMark[] = [];
+  if (activeRoute) {
+    let from = 0;
+    wpIds.forEach((id, n) => {
+      const poi = poiById(id);
+      const cell = poi ? grid.toCell(poi.lon, poi.lat) : null;
+      if (!cell) return;
+      const at = activeRoute.path.findIndex((c, i) => i >= from && c.r === cell.r && c.c === cell.c);
+      if (at === -1) return;
+      profileMarks.push({ index: at, label: `Science stop ${n + 1}` });
+      from = at;
+    });
+  }
+
+  const walkHours = activeRoute ? activeRoute.metrics.distanceKm / speed : 0;
+  const scienceHours = scenario?.scienceHours ?? 0;
+  const checks = activeRoute
+    ? evaChecks({
+        walkHours,
+        scienceHours,
+        budgetHours: scenario?.evaBudgetHours ?? null,
+        daylightEarthHours: sun.earthH,
+        unknownShare: activeRoute.metrics.unknownShare,
+        maxSlopeDeg: activeRoute.metrics.maxSlopeDeg,
+        highSlopeKm: activeRoute.metrics.distanceByClassKm.high,
+        roverOnRoute: traverse ? roverOnPath(traverse.stops, grid, activeRoute.path) : null,
+        spaceWeather: weatherNow?.assessment ?? null,
+        spaceWeatherAgeHours: weatherNow?.ageHours ?? null,
+      })
+    : [];
+  /** GCR dose equivalent for the planned EVA at the quiet-sun Gale rate; order of magnitude only. */
+  const evaDoseMsv = (SAFETY.gcrDoseMsvPerDay * (walkHours + scienceHours)) / 24;
 
   const geojson = () => {
     if (!plan || !start || !end) return;
@@ -264,10 +450,22 @@ export default function App() {
       `Science targets within ${POI_CORRIDOR_KM} km: ${m.nearbyPois.map((p) => `${p.name} (${p.distKm.toFixed(1)} km)`).join("; ") || "none"}`,
       `Reference cost (Balanced model): ${m.referenceCost.toFixed(2)} cost-km`,
       "",
+      "--- Pre-EVA planning checks (assumptions, not flight rules) ---",
+      ...checks.map((c) => `[${c.status.toUpperCase()}] ${c.label}: ${c.detail}`),
+      "",
+      "--- Conditions ---",
+      `Season: ${sun.season}, Ls ${sun.ls.toFixed(1)} deg; daylight ${sun.earthH.toFixed(1)} h at ${siteLat.toFixed(2)} N (computed, flat horizon).`,
+      medaNow
+        ? `MEDA (Perseverance) sol ${medaNow.latest.sol}, ${medaNow.latest.terrestrialDate}: air ${medaNow.temp ? `${medaNow.temp.minC.toFixed(0)} to ${medaNow.temp.maxC.toFixed(0)} C` : "not reported"}, pressure ${medaNow.pressure ? `${medaNow.pressure.pa.toFixed(0)} Pa` : "not reported"}${medaNow.stale ? ` (archived report, ${Math.round(medaNow.ageDays)} days old)` : ""}.`
+        : "MEDA surface weather: unavailable.",
+      weatherNow
+        ? `Space weather (NASA DONKI WSA-ENLIL, ${weatherNow.feed.origin}, retrieved ${new Date(weatherNow.feed.retrievedMs).toISOString()}): ${LEVEL_LABEL[weatherNow.level]}; ${weatherNow.assessment.next ? `next predicted CME arrival at Mars ${weatherNow.assessment.next.arrivalIso}` : "no upcoming CME arrival at Mars listed"}.`
+        : "Space weather: unavailable.",
+      "",
       "--- Safety notes ---",
-      `GCR dose equivalent ~${SAFETY.gcrDoseMsvPerDay} mSv/day (~${SAFETY.gcrDoseMgyPerDay} mGy/day absorbed; Curiosity RAD / Gale; not Jezero-specific).`,
+      `GCR dose equivalent ~${SAFETY.gcrDoseMsvPerDay} mSv/day (~${SAFETY.gcrDoseMgyPerDay} mGy/day absorbed; Curiosity RAD / Gale; not Jezero-specific), i.e. ~${evaDoseMsv.toFixed(2)} mSv for this EVA under quiet conditions.`,
       SAFETY.speNote,
-      "Not modelled: roughness, rock abundance, illumination, real-time radiation, suit mobility limits.",
+      "Not modelled: roughness, rock abundance, terrain shadowing, particle-event dose, suit mobility limits.",
       "Slope classes and cost profiles are planning assumptions, not certified mobility limits.",
       "", ...explain(plan!.routes),
     ];
@@ -276,24 +474,40 @@ export default function App() {
 
   const toggle = (k: keyof LayerState) => setLayers((l) => {
     const next = { ...l, [k]: !l[k] };
-    // Keep at least one local terrain layer visible so the map never goes blank
-    // when NASA Trek tiles are blocked.
+    // When NASA Trek imagery is unreachable, keep one bundled terrain layer on so
+    // the map never goes blank. With imagery available, any combination is allowed.
     const localOn = next.elevation || next.slope || next.terrainClass;
-    if (!localOn && (k === "elevation" || k === "slope" || k === "terrainClass")) {
+    if (basemap === "error" && !localOn && (k === "elevation" || k === "slope" || k === "terrainClass")) {
       return { ...next, elevation: true };
     }
     return next;
   });
 
-  const workspaceCopy: Record<Workspace, { eyebrow: string; title: string; description: string; action: string }> = {
-    overview: { eyebrow: "MISSION CONTROL / JEZERO", title: "Mission overview", description: "A starting point for the Jezero surface exploration scenario.", action: "Explore surface" },
-    explorer: { eyebrow: "SURFACE OPERATIONS / JEZERO", title: "Mars explorer", description: "Inspect scientific context, terrain layers and selected locations.", action: "Open planner" },
-    planner: { eyebrow: "TRAVERSE DESIGN / JEZERO", title: "Mission planner", description: "Choose science stops and compare terrain-aware traverse options.", action: "Back to explorer" },
+  const workspaceCopy: Record<Workspace, { eyebrow: string; title: string; description: string; action: string; next: Workspace }> = {
+    overview: { eyebrow: "MISSION CONTROL / JEZERO", title: "Mission overview", description: "Scenario brief, current conditions and the NASA data behind this view.", action: "Explore surface", next: "explorer" },
+    explorer: { eyebrow: "SURFACE OPERATIONS / JEZERO", title: "Mars explorer", description: "Layer imagery, thermal, mineral and rover data; inspect any location.", action: plan ? "Review routes" : start && end ? "Plan this traverse" : "Open planner", next: "planner" },
+    planner: { eyebrow: "TRAVERSE DESIGN / JEZERO", title: "Mission planner", description: "Choose science stops, compare terrain-aware routes and run the pre-EVA checks.", action: "Back to explorer", next: "explorer" },
   };
+
+  const activeLayerCount = (Object.keys(layers) as (keyof LayerState)[]).filter((k) => layers[k]).length;
+  const flagged = checks.filter((c) => c.status === "flag").length;
+  const cautions = checks.filter((c) => c.status === "caution").length;
+  const navStatus: Record<Workspace, string> = {
+    overview: scenario ? "Scenario loaded" : "Scenario & data status",
+    explorer: `${activeLayerCount} layers on${selected ? " · point selected" : ""}`,
+    planner: activeRoute
+      ? `${f(activeRoute.metrics.distanceKm, 1)} km ${activeRoute.label}${flagged ? ` · ${flagged} flagged` : cautions ? ` · ${cautions} caution${cautions > 1 ? "s" : ""}` : " · checks pass"}`
+      : start && end ? "Stops set · ready to plan" : start || end ? "One stop set" : "Routes & EVA checks",
+  };
+  const openPlannerAction = () => {
+    if (workspace === "explorer" && start && end && !plan) run();
+    go(workspaceCopy[workspace].next);
+  };
+  const remainingPois = pois.filter((poi) => !wpIds.includes(poi.id));
 
   return (
     <div className={`app workspace-${workspace}`} data-workspace={workspace}>
-      <aside className="side left" data-workspace={workspace}>
+      <aside className="side left" data-workspace={workspace} ref={leftSide}>
         <div className="brand-block">
           <img className="brand-mark" src={`${import.meta.env.BASE_URL}marscraft-emblem.png`} alt="MarsCraft emblem" />
           <div className="brand-copy"><h1>MarsCraft</h1><small>HUMAN SURFACE EXPLORATION</small></div>
@@ -301,69 +515,95 @@ export default function App() {
         </div>
         <div className="workspace-nav-label">WORKSPACES</div>
         <nav className="workspace-nav" aria-label="Workspace navigation">
-          <button type="button" className={`workspace-nav-item${workspace === "overview" ? " active" : ""}`} aria-current={workspace === "overview" ? "page" : undefined} onClick={() => setWorkspace("overview")}>
-            <span className="nav-index">01</span><span className="nav-label"><strong>Mission overview</strong><small>Scenario & data status</small></span>
-          </button>
-          <button type="button" className={`workspace-nav-item${workspace === "explorer" ? " active" : ""}`} aria-current={workspace === "explorer" ? "page" : undefined} onClick={() => setWorkspace("explorer")}>
-            <span className="nav-index">02</span><span className="nav-label"><strong>Mars explorer</strong><small>Map & science layers</small></span>
-          </button>
-          <button type="button" className={`workspace-nav-item${workspace === "planner" ? " active" : ""}`} aria-current={workspace === "planner" ? "page" : undefined} onClick={() => setWorkspace("planner")}>
-            <span className="nav-index">03</span><span className="nav-label"><strong>Mission planner</strong><small>Routes & EVA context</small></span>
-          </button>
+          {WORKSPACES.map((w, i) => (
+            <a
+              key={w}
+              href={`#/${w}`}
+              className={`workspace-nav-item${workspace === w ? " active" : ""}`}
+              aria-current={workspace === w ? "page" : undefined}
+              title={`${WORKSPACE_TITLE[w]} (press ${i + 1})`}
+            >
+              <span className="nav-index">0{i + 1}</span>
+              <span className="nav-label"><strong>{WORKSPACE_TITLE[w]}</strong><small>{navStatus[w]}</small></span>
+            </a>
+          ))}
         </nav>
         <div className="side-divider" />
         <div className="howto workspace-panel overview-panel">
           <strong>Quick path</strong>
           <ol>
-            <li>Load the demo EVA or set start / destination on the map.</li>
-            <li>Check layers and Safety, then compare routes (prefer Cautious near steep or unknown ground).</li>
-            <li>Read the elevation profile and export the summary.</li>
+            <li>Load the demo EVA, or pick a start and destination on the map.</li>
+            <li>Check the layers and current conditions, then compare routes (prefer Cautious near steep or unknown ground).</li>
+            <li>Run the pre-EVA checks, trace the elevation profile and export the summary.</li>
           </ol>
         </div>
         {synth && (
           <div className="warn"><strong>Synthetic terrain.</strong> The elevation grid is generated development data, not NASA measurements. Slopes and routes below do not describe the real surface. Points of interest are real literature locations drawn over this fake terrain. Run <code>npm run data:real</code> to load the USGS MOLA/HRSC DEM.</div>
         )}
         {resourceErrors.map((message) => <div className="warn err" key={message}>{message}. Affected layers may be unavailable.</div>)}
-        <Panel title="Layers" className="workspace-panel explorer-panel planner-panel" info="Show or hide map data. Local Elevation / Slope / Slope class work offline. Viking and THEMIS need NASA Trek network access. CRISM is a qualitative mineral figure; HiRISE boxes mark high-resolution coverage.">
-          <div className="sub" style={{ marginBottom: 4 }}>Optical · Thermal · Spectral</div>
-          <label className="row"><input type="checkbox" checked={layers.basemap} onChange={() => toggle("basemap")} />Surface imagery (Viking) <span className="tag">optical</span></label>
-          <div className="sub">{basemap === "error" ? <span className="err">NASA Trek tiles blocked in this browser/network. Use Elevation / Slope below — those are local.</span> : basemap === "loading" ? "Loading tiles..." : "Viking MDIM 2.1, NASA Mars Trek"}</div>
-          <label className="row"><input type="checkbox" checked={layers.themisDay} onChange={() => toggle("themisDay")} />THEMIS Day IR <span className="tag">thermal</span></label>
-          <label className="row"><input type="checkbox" checked={layers.themisNight} onChange={() => toggle("themisNight")} />THEMIS Night IR <span className="tag">thermal</span></label>
+        <Panel title="Layers" className="workspace-panel explorer-panel planner-panel" info="Show or hide map data. Topography, minerals and the rover traverse are bundled and work offline. Viking, CTX, HiRISE and THEMIS imagery streams from NASA Mars Trek. Imagery sits beneath the topography overlays, so lower the overlay opacity to see more of it.">
+          <div className="layer-group">Imagery · optical</div>
+          <label className="row"><input type="checkbox" checked={layers.basemap} onChange={() => toggle("basemap")} />Viking colour mosaic <span className="tag">232 m</span></label>
+          <div className="sub">{basemap === "error" ? <span className="err">NASA Trek imagery is unreachable from this network. Topography, minerals and the rover traverse are bundled and still work.</span> : basemap === "loading" ? "Loading tiles..." : "Regional context, NASA Mars Trek"}</div>
+          <label className="row"><input type="checkbox" checked={layers.ctx} onChange={() => toggle("ctx")} />CTX mosaic, Jezero <span className="tag">6 m</span></label>
+          <label className="row"><input type="checkbox" checked={layers.hiriseMosaic} onChange={() => toggle("hiriseMosaic")} />HiRISE mosaic, Jezero <span className="tag">25 cm</span></label>
+          {layers.hiriseMosaic && <div className="sub">Boulder-scale imagery (MRO). Zoom in along the route to see individual rocks and outcrops.</div>}
+          <label className="row"><input type="checkbox" checked={layers.hirise} onChange={() => toggle("hirise")} />HiRISE footprints <span className="tag">approx.</span></label>
+          {layers.hirise && <div className="sub">Approximate boxes marking other high-resolution coverage; not image tiles.</div>}
+
+          <div className="layer-group">Thermal · spectral</div>
+          <label className="row"><input type="checkbox" checked={layers.themisDay} onChange={() => toggle("themisDay")} />THEMIS day infrared <span className="tag">100 m</span></label>
+          <label className="row"><input type="checkbox" checked={layers.themisNight} onChange={() => toggle("themisNight")} />THEMIS night infrared <span className="tag">100 m</span></label>
           {(layers.themisDay || layers.themisNight) && (
-            <div className="sub" style={{ color: basemap === "error" || ((layers.elevation || layers.slope || layers.terrainClass) && opacity > 0.35) ? "var(--err)" : undefined }}>
+            <div className="sub">
               {basemap === "error"
-                ? "THEMIS also comes from NASA Trek — same network block as Viking. Local Elevation/Slope still work."
-                : (layers.elevation || layers.slope || layers.terrainClass) && opacity > 0.35
-                  ? "THEMIS is under the topography overlays — uncheck Elevation / Slope / Slope class (or lower opacity) to see it."
-                  : "Day IR: brighter = warmer. Night IR: rocky ground stays brighter. Compare against Viking by toggling Surface imagery."}
+                ? <span className="err">THEMIS also streams from NASA Trek and is unreachable.</span>
+                : <>Day: brighter is warmer. Night: rocky, high-inertia ground stays brighter; dust and sand go dark.{(layers.ctx || layers.hiriseMosaic) && ` Blended at ${Math.round(THERMAL_BLEND_OPACITY * 100)}% over the high-resolution imagery.`}</>}
             </div>
           )}
-          <label className="row"><input type="checkbox" checked={layers.minerals} onChange={() => toggle("minerals")} />CRISM mineral signatures <span className="tag">spectral</span></label>
+          <label className="row"><input type="checkbox" checked={layers.minerals} onChange={() => toggle("minerals")} />CRISM mineral signatures <span className="tag">figure</span></label>
           {layers.minerals && (
             <div className="sub">
               Green ≈ carbonates; red ≈ olivine (PIA23380). Publication figure with approximate georeference — use for science context, not surveying.
             </div>
           )}
-          <label className="row"><input type="checkbox" checked={layers.hirise} onChange={() => toggle("hirise")} />HiRISE footprints <span className="tag">optical · high-res</span></label>
-          {layers.hirise && <div className="sub">Approximate boxes where ~25–50 cm imagery exists — boulder-scale context, not loaded as tiles.</div>}
-          <div className="sub" style={{ margin: "8px 0 4px" }}>Topography (this grid)</div>
+
+          <div className="layer-group">In situ</div>
+          <label className="row"><input type="checkbox" checked={layers.traverse} onChange={() => toggle("traverse")} disabled={!traverse} />Perseverance traverse <span className="tag">Mars 2020</span></label>
+          {layers.traverse && traverse && (
+            <div className="sub">{(traverse.totalDistanceM / 1000).toFixed(1)} km actually driven, to sol {traverse.lastSol}. Select a point within {ROVER_NEAR_M / 1000} km of it to compare the grid with rover measurements and camera views.</div>
+          )}
+
+          <div className="layer-group">Topography · this grid</div>
           <label className="row"><input type="checkbox" checked={layers.elevation} onChange={() => toggle("elevation")} />Elevation <span className="tag">{synth ? "synthetic" : "DEM"}</span></label>
           <label className="row"><input type="checkbox" checked={layers.slope} onChange={() => toggle("slope")} />Slope <span className="tag derived">derived</span></label>
           <label className="row"><input type="checkbox" checked={layers.terrainClass} onChange={() => toggle("terrainClass")} />Slope class <span className="tag derived">derived</span></label>
+          <label className="row range">Overlay opacity <input type="range" min={0.15} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(+e.target.value)} aria-label="Topography overlay opacity" /><span>{Math.round(opacity * 100)}%</span></label>
+
+          <div className="layer-group">Planning</div>
           <label className="row"><input type="checkbox" checked={layers.reachability} onChange={() => toggle("reachability")} disabled={!start} />Walk-back reachability <span className="tag derived">derived</span></label>
-          {layers.reachability && (
+          {!start && <div className="sub">Set a start point to enable the walk-back range.</div>}
+          {layers.reachability && start && (
             <div className="sub">
-              {!start
-                ? "Set a start point to compute walk-back range."
-                : reachBusy
-                  ? "Computing walk-back range…"
-                  : `Green = reachable from start with return still possible within half the walking budget (${f(walkBackM / 1000, 1)} km one-way at ${speed} km/h; Cautious exclusions).`}
+              {reachBusy
+                ? "Computing walk-back range…"
+                : `Cyan-blue = reachable from start with return still possible within half the walking budget (${f(walkBackM / 1000, 1)} km one-way at ${speed} km/h; Cautious exclusions).`}
             </div>
           )}
           <label className="row"><input type="checkbox" checked={layers.poi} onChange={() => toggle("poi")} />Scientific points of interest</label>
           <label className="row"><input type="checkbox" checked={layers.routes} onChange={() => toggle("routes")} />Planned routes <span className="tag derived">derived</span></label>
-          <label className="row" style={{ marginTop: 6 }}>Overlay opacity <input type="range" min={0.2} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(+e.target.value)} /></label>
+        </Panel>
+        <Panel title="Science targets" className="workspace-panel explorer-panel" info="Literature-sourced points of interest. Choosing one selects it and moves the map to it; its details, caveats and any rover ground truth appear under Selected location.">
+          <ul className="target-list">
+            {pois.map((poi) => (
+              <li key={poi.id}>
+                <button type="button" className={`target${selectedPoi === poi.id ? " active" : ""}`} onClick={() => focusPoi(poi.id)}>
+                  <strong>{poi.name.split(" (")[0]}</strong>
+                  <small>{poi.category}{wpIds.includes(poi.id) ? " · waypoint" : ""}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
         </Panel>
         <Panel title="Legend" className="legend workspace-panel explorer-panel planner-panel" info="Colour keys for active overlays and routes. Derived layers are computed here from the DEM, not separate NASA products.">
           {layers.elevation && (<div><div>Elevation (m)</div><div className="bar" style={{ background: cssRamp(ELEV_RAMP) }} /><div className="ends"><span>{f(range[0], 0)}</span><span>{f(range[1], 0)}</span></div></div>)}
@@ -392,23 +632,38 @@ export default function App() {
           )}
           {layers.reachability && (
             <div className="item" style={{ marginTop: 4 }}>
-              <span className="sw" style={{ background: "rgba(46,140,90,0.55)" }} />
+              <span className="sw" style={{ background: "rgba(0,190,255,0.7)" }} />
               Walk-back reachability (from start)
             </div>
+          )}
+          {layers.traverse && (
+            <>
+              <div className="item" style={{ marginTop: 4 }}>
+                <span className="sw line" style={{ background: TRAVERSE_COLOR }} />
+                Perseverance traverse (driven path)
+              </div>
+              <div className="item">
+                <span className="sw pin-key">R</span>
+                Rover stop nearest the selected point
+              </div>
+            </>
           )}
         </Panel>
         <Panel title="About this data" className="workspace-panel overview-panel explorer-panel" info="Working grid is a cropped HRSC+MOLA blend around Jezero. Product names, processing steps, and limits are in DATA_SOURCES.md and METHODOLOGY.md.">
           <dl className="kv">
             <dt>Extent</dt><dd>{grid.south.toFixed(1)} to {grid.meta.north.toFixed(1)} N, {grid.meta.west.toFixed(1)} to {grid.east.toFixed(1)} E</dd>
-            <dt>Cell size</dt><dd>{grid.meta.dLon} deg (about {(grid.meta.dLat * Math.PI / 180 * grid.meta.radiusM / 1000).toFixed(2)} km)</dd>
+            <dt>Cell size</dt><dd>{grid.meta.dLon.toFixed(4)} deg (about {cellKm.toFixed(2)} km)</dd>
             <dt>Missing elevation</dt><dd>{(stats.missing / stats.total * 100).toFixed(1)}% of cells</dd>
             <dt>Unknown slope</dt><dd>{(stats.c.unknown / stats.total * 100).toFixed(1)}% of cells</dd>
             <dt>Low / mod / high</dt><dd>{(stats.c.low / stats.total * 100).toFixed(0)}% / {(stats.c.moderate / stats.total * 100).toFixed(0)}% / {(stats.c.high / stats.total * 100).toFixed(0)}%</dd>
           </dl>
           <div style={{ marginTop: 8 }}><strong>Elevation:</strong> {grid.meta.title}</div>
           <div className="sub" style={{ marginLeft: 0 }}>{grid.meta.source}{grid.meta.sourceUrl && <> <a href={grid.meta.sourceUrl} target="_blank" rel="noreferrer">Record</a></>}</div>
-          <div style={{ marginTop: 4 }}><strong>Imagery:</strong> {BASEMAP.name}</div>
+          <div style={{ marginTop: 4 }}><strong>Imagery:</strong> {BASEMAP.name}; CTX and HiRISE orthomosaics inside Jezero</div>
           <div style={{ marginTop: 4 }}><strong>Slope:</strong> Horn 3×3 on this DEM (derived).</div>
+          {traverse && (
+            <div style={{ marginTop: 4 }}><strong>In situ:</strong> Perseverance traverse to sol {traverse.lastSol}, retrieved {traverse.retrieved}.</div>
+          )}
           <details style={{ marginTop: 4 }}><summary>Processing and limitations</summary><ul className="plain">{grid.meta.processing.map((x, i) => <li key={"p" + i}>{x}</li>)}{grid.meta.limitations.map((x, i) => <li key={"l" + i}>{x}</li>)}</ul></details>
         </Panel>
       </aside>
@@ -420,17 +675,30 @@ export default function App() {
             <strong>{workspaceCopy[workspace].title}</strong>
             <span>{workspaceCopy[workspace].description}</span>
           </div>
-          <button type="button" className="workspace-header-action" onClick={() => setWorkspace(workspace === "planner" ? "explorer" : workspace === "explorer" ? "planner" : "explorer")}>
+          <div className="header-chips" role="group" aria-label="Current conditions summary">
+            <span className="chip daylight" title={`Sunrise to sunset today at ${siteLat.toFixed(2)}° N (computed, flat horizon)`}>
+              <small>DAYLIGHT</small>{sun.earthH.toFixed(1)} h
+            </span>
+            <span className="chip season" title="Season at the site, from today's solar longitude">
+              <small>SEASON</small>{sun.season}
+            </span>
+            <span className={`chip level ${weatherNow?.level ?? "unknown"}`} title="Predicted CME arrivals at Mars (NASA DONKI). Details under Current conditions.">
+              <small>SPACE WEATHER</small>{weather.state === "loading" ? "checking…" : LEVEL_LABEL[weatherNow?.level ?? "unknown"]}
+            </span>
+          </div>
+          <button type="button" className="workspace-header-action" onClick={openPlannerAction}>
             {workspaceCopy[workspace].action}<span aria-hidden="true">→</span>
           </button>
         </header>
         <div className="map-area">
           <MapView
             grid={grid} images={images} layers={layers} overlayOpacity={opacity} pois={pois} hirise={hirise}
+            traverse={traverse?.paths ?? null} traverseLabel={traverseLabel} roverStop={roverMarker} scrub={scrubPoint}
             selected={selected} selectedPoiId={selectedPoi} start={start} end={end} waypointIds={wpIds}
             routes={lines} activeProfile={active}
-            fitSeq={fitSeq}
-            fitLatLngs={activeRoute ? activeRoute.path.map((c) => [grid.centerLat(c.r), grid.centerLon(c.c)] as [number, number]) : undefined}
+            initialView={JEZERO_VIEW}
+            fitSeq={fit.seq}
+            fitLatLngs={fitLatLngs}
             onMapClick={handleMapClick} onHover={setHover} onPoiClick={handlePoi} onBasemapStatus={(s) => {
               setBasemap(s);
               if (s === "error") {
@@ -440,31 +708,52 @@ export default function App() {
             }}
           />
           {synth && <div className="overlay-note">Synthetic terrain: not NASA data</div>}
-          {activeRoute && (
-            <button
-              type="button"
-              className="profile-toggle"
-              onClick={() => setShowProfile((v) => !v)}
-              title={showProfile ? "Hide elevation profile" : "Show elevation profile"}
-            >
-              {showProfile ? "Hide profile" : "Show profile"}
+          <div className="map-tools" role="group" aria-label="Map view">
+            <button type="button" onClick={() => requestFit("jezero")} title="Jezero crater, delta and rover traverse">Jezero</button>
+            <button type="button" onClick={() => requestFit("region")} title="Whole analysed grid">Region</button>
+            <button type="button" onClick={() => requestFit("route")} disabled={!activeRoute} title={activeRoute ? "Fit the active route" : "Plan a route first"}>Route</button>
+          </div>
+          {activeRoute && !showProfile && (
+            <button type="button" className="profile-toggle" onClick={() => setShowProfile(true)}>
+              Show elevation profile
             </button>
           )}
         </div>
         {activeRoute && showProfile && (
           <div className="profile-dock">
             <div className="profile-dock-head">
-              <span>Elevation along route · {activeRoute.label}</span>
+              <span>Elevation along route · {activeRoute.label} · {f(activeRoute.metrics.distanceKm, 2)} km</span>
               <button type="button" className="text-btn" onClick={() => setShowProfile(false)}>Hide</button>
             </div>
-            <ElevationProfile grid={grid} path={activeRoute.path} label={activeRoute.label} />
+            <ElevationProfile grid={grid} slope={slope} path={activeRoute.path} marks={profileMarks} onScrub={setScrubIdx} />
           </div>
         )}
       </main>
 
-      <aside className="side right" data-workspace={workspace}>
-        <Panel title="Selected location" className="workspace-panel explorer-panel" info="Click the map or a point of interest. Slope class is a planning bin, not a certified safety limit. Missing elevation is treated as unknown, never as flat or safe.">
-          {!selected && <div className="sub" style={{ marginLeft: 0 }}>Click the map or a point of interest.</div>}
+      <aside className="side right" data-workspace={workspace} ref={rightSide}>
+        {activeRoute && (
+          <button
+            type="button"
+            className="plan-status workspace-panel planner-panel"
+            onClick={() => document.getElementById("mission-summary")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            title="Jump to the pre-EVA checks and mission summary"
+          >
+            <span className="sw" style={{ background: ROUTE_COLORS[activeRoute.profile] }} />
+            <span className="plan-status-main">
+              <strong>{activeRoute.label} route · {f(activeRoute.metrics.distanceKm, 2)} km · {f(walkHours + scienceHours, 1)} h</strong>
+              <small>
+                {checks.filter((c) => c.status === "ok").length} pass · {cautions} caution · {flagged} flagged · {checks.filter((c) => c.status === "unknown").length} unknown
+              </small>
+            </span>
+            <span className="plan-status-go">Checks ↓</span>
+          </button>
+        )}
+        <Panel title="Selected location" className="workspace-panel explorer-panel planner-panel" info="Click the map or a point of interest. Slope class is a planning bin, not a certified safety limit. Missing elevation is treated as unknown, never as flat or safe.">
+          {!selected && (
+            <div className="sub" style={{ marginLeft: 0 }}>
+              Click the map or a point of interest to inspect it{workspace === "planner" ? ", then set it as the start or destination" : ""}.
+            </div>
+          )}
           {selected && sel && (
             <>
               <dl className="kv">
@@ -474,162 +763,98 @@ export default function App() {
                 <dt>Class</dt><dd>{CLASS_LABEL[sel.cls]}</dd>
                 <dt>Data</dt><dd>{sel.cls === "unknown" ? "Insufficient. Not treated as safe." : "Elevation and neighbours available."}</dd>
               </dl>
-              <div className="btns">
-                <button onClick={() => setStart(selected)}>Set as start</button>
-                <button onClick={() => setEnd(selected)}>Set as destination</button>
-              </div>
+              {!selPoi && (
+                <div className="btns">
+                  <button onClick={() => setStart(selected)}>Set as start</button>
+                  <button onClick={() => setEnd(selected)}>Set as destination</button>
+                </div>
+              )}
             </>
           )}
           {selPoi && (
             <div style={{ marginTop: 8, borderTop: "1px solid #e2e2de", paddingTop: 6 }}>
               <strong>{selPoi.name}</strong>
               <div><span className="tag">{selPoi.category}</span></div>
-              <dl className="kv" style={{ marginTop: 4 }}>
-                <dt>Status</dt><dd>{selPoi.status}</dd>
-                <dt>Summary</dt><dd>{selPoi.summary}</dd>
-                <dt>Reported</dt><dd>{selPoi.observations}</dd>
-                <dt>Instrument</dt><dd>{selPoi.mission}</dd>
-                <dt>Source</dt><dd>{selPoi.source}</dd>
-                <dt>Caveats</dt><dd>{selPoi.uncertainty}</dd>
-              </dl>
-              {selPoi.pov && (
-                <div className="pov">
-                  <div className="pov-title">What you may see · {selPoi.pov.title}</div>
-                  <img
-                    src={selPoi.pov.url.startsWith("http") ? selPoi.pov.url : (import.meta.env.BASE_URL + selPoi.pov.url)}
-                    alt={selPoi.pov.title}
-                    loading="lazy"
-                  />
-                  <div className="sub" style={{ marginLeft: 0 }}>{selPoi.pov.caption}</div>
-                  <div className="sub" style={{ marginLeft: 0 }}>
-                    {selPoi.pov.credit}
-                    {selPoi.pov.sourceUrl && <> · <a href={selPoi.pov.sourceUrl} target="_blank" rel="noreferrer">Source</a></>}
-                  </div>
-                </div>
-              )}
               <div className="btns">
                 <button onClick={() => setStart({ lon: selPoi.lon, lat: selPoi.lat })}>Start here</button>
                 <button onClick={() => setEnd({ lon: selPoi.lon, lat: selPoi.lat })}>Destination here</button>
-                <button onClick={() => setWpIds((w) => (w.includes(selPoi.id) ? w : [...w, selPoi.id]))} disabled={wpIds.includes(selPoi.id)}>Add as waypoint</button>
+                <button onClick={() => setWpIds((w) => (w.includes(selPoi.id) ? w : [...w, selPoi.id]))} disabled={wpIds.includes(selPoi.id)}>{wpIds.includes(selPoi.id) ? "Waypoint added" : "Add as waypoint"}</button>
               </div>
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Safety context" className="safety workspace-panel explorer-panel planner-panel" info="Crew-awareness notes only. Radiation figures are order-of-magnitude. Roughness, rocks, illumination, and live space weather are not modelled. Prefer Cautious near high or unknown slope.">
-          <div className="safety-lead">NASA priority is crew safety. This panel states what the tool models and what it does not.</div>
-
-          {selected && sel && (
-            <div className="safety-box">
-              <strong>At selected point</strong>
-              <div>
-                Slope class: <strong>{CLASS_LABEL[sel.cls]}</strong>
-                {sel.cls === "unknown" && <span className="err"> — treat as hazard until better data is available</span>}
-                {sel.cls === "high" && <span className="err"> — prefer Cautious profile or avoid if possible</span>}
-                {sel.cls === "moderate" && <span> — usable with care; check THEMIS for rocky vs dusty surface</span>}
-                {sel.cls === "low" && <span> — lower slope penalty in the planner</span>}
-              </div>
-            </div>
-          )}
-
-          {activeRoute && (
-            <div className="safety-box">
-              <strong>On active route ({activeRoute.label})</strong>
-              <div>
-                Unknown-slope share: {(activeRoute.metrics.unknownShare * 100).toFixed(0)}%
-                {activeRoute.metrics.unknownShare > 0.05
-                  ? <span className="err"> — significant gaps; consider Cautious or a different corridor</span>
-                  : <span> — low data gap on this path</span>}
-              </div>
-              <div>
-                Max known slope: {f(activeRoute.metrics.maxSlopeDeg)} deg
-                {activeRoute.profile === "shortest" && activeRoute.metrics.maxSlopeDeg > 10 && (
-                  <span className="err"> — Shortest profile ignores moderate slopes; review Balanced or Cautious</span>
+              {/* Open while exploring; folded in the planner so route results stay in reach. */}
+              <details className="poi-details" open={workspace !== "planner"}>
+                <summary>Science notes, sources and surface view</summary>
+                <dl className="kv" style={{ marginTop: 4 }}>
+                  <dt>Status</dt><dd>{selPoi.status}</dd>
+                  <dt>Summary</dt><dd>{selPoi.summary}</dd>
+                  <dt>Reported</dt><dd>{selPoi.observations}</dd>
+                  <dt>Instrument</dt><dd>{selPoi.mission}</dd>
+                  <dt>Source</dt><dd>{selPoi.source}</dd>
+                  <dt>Caveats</dt><dd>{selPoi.uncertainty}</dd>
+                </dl>
+                {selPoi.pov && (
+                  <div className="pov">
+                    <div className="pov-title">What you may see · {selPoi.pov.title}</div>
+                    <img
+                      src={selPoi.pov.url.startsWith("http") ? selPoi.pov.url : (import.meta.env.BASE_URL + selPoi.pov.url)}
+                      alt={selPoi.pov.title}
+                      loading="lazy"
+                    />
+                    <div className="sub" style={{ marginLeft: 0 }}>{selPoi.pov.caption}</div>
+                    <div className="sub" style={{ marginLeft: 0 }}>
+                      {selPoi.pov.credit}
+                      {selPoi.pov.sourceUrl && <> · <a href={selPoi.pov.sourceUrl} target="_blank" rel="noreferrer">Source</a></>}
+                    </div>
+                  </div>
                 )}
-              </div>
-              {activeRoute.profile !== "cautious" && (activeRoute.metrics.unknownShare > 0.02 || activeRoute.metrics.maxSlopeDeg > 12) && (
-                <div className="safety-rec">Recommendation: switch to <strong>Cautious</strong> when science targets sit near high-slope or unknown cells.</div>
-              )}
+              </details>
             </div>
           )}
-
-          <div className="safety-box">
-            <strong>Radiation (order of magnitude)</strong>
-            <div>
-              Typical GCR <strong>dose equivalent</strong> at the surface is about <strong>{SAFETY.gcrDoseMsvPerDay} mSv/day</strong>
-              (~{SAFETY.gcrDoseMgyPerDay} mGy/day absorbed), from Curiosity RAD at Gale crater (Hassler et al. 2014) — not Jezero-specific.
-              A multi-hour EVA is a small fraction of that daily rate under quiet conditions.
-            </div>
-            <div className="sub" style={{ marginLeft: 0, marginTop: 4 }}>{SAFETY.speNote}</div>
-          </div>
-
-          <div className="safety-cols">
-            <div>
-              <strong>Modelled here</strong>
-              <ul className="plain">
-                {SAFETY.modelled.map((x) => <li key={x}>{x}</li>)}
-              </ul>
-            </div>
-            <div>
-              <strong>Not modelled</strong>
-              <ul className="plain">
-                {SAFETY.notModelled.map((x) => <li key={x}>{x}</li>)}
-              </ul>
-            </div>
-          </div>
-          <div className="sub" style={{ marginLeft: 0, marginTop: 6 }}>
-            Cost-profile parameters and slope bins are planning assumptions, not certified mobility or medical limits. See METHODOLOGY.md.
-          </div>
-        </Panel>
-
-        <Panel title="Mission scenario" className="mission workspace-panel overview-panel planner-panel" info="Loads a demonstration Marswalk with science goal, habitat proxy, waypoints, speed, and Cautious routing defaults. You can still edit stops after loading.">
-          {!scenario && (
-            <>
-              <div className="sub" style={{ marginLeft: 0, marginBottom: 6 }}>
-                Load a demonstration Marswalk with science goal, habitat proxy, waypoints, and Cautious routing defaults.
-              </div>
-              <div className="btns">
-                <button className="primary" onClick={() => loadScenario(DELTA_MARGIN_EVA)}>Load Jezero Delta Margin EVA</button>
-              </div>
-            </>
-          )}
-          {scenario && (
-            <>
-              <strong>{scenario.title}</strong>
-              <p className="mission-obj">{scenario.objective}</p>
-              <dl className="kv">
-                <dt>EVA budget</dt>
-                <dd>{scenario.evaBudgetHours} h concept ({scenario.scienceHours} h science + walking at {scenario.speedKmh} km/h)</dd>
-                <dt>Safety posture</dt>
-                <dd>{scenario.safetyPosture}</dd>
-                <dt>Preferred profile</dt>
-                <dd>{scenario.preferredProfile}</dd>
-              </dl>
-              <ul className="plain">
-                {scenario.notes.map((n) => <li key={n}>{n}</li>)}
-              </ul>
-              <div className="btns" style={{ marginTop: 6 }}>
-                <button onClick={() => loadScenario(scenario)}>Reload &amp; replan</button>
-                <button onClick={() => setScenario(null)}>Dismiss brief</button>
-              </div>
-            </>
+          {selected && sel && nearRover && (
+            <RoverGroundTruth stop={nearRover.stop} distM={nearRover.distM} gridElevM={sel.e} gridSlopeDeg={sel.s} cellKm={cellKm} />
           )}
         </Panel>
 
         <Panel title="Marswalk planner" className="workspace-panel planner-panel" info="Set start, destination, and optional science waypoints, then plan three cost profiles. Walking speed only estimates duration — it is not validated mobility data.">
           <dl className="kv">
             <dt>Start</dt><dd>{start ? <>{coord(snap(start))} <button onClick={() => setStart(null)}>Clear</button></> : <span className="sub" style={{ marginLeft: 0 }}>not set</span>}</dd>
-            <dt>Destination</dt><dd>{end ? <>{coord(snap(end))} <button onClick={() => setEnd(null)}>Clear</button></> : <span className="sub" style={{ marginLeft: 0 }}>not set</span>}</dd>
+            <dt>Destination</dt>
+            <dd>
+              {end ? <>{coord(snap(end))} <button onClick={() => setEnd(null)}>Clear</button></> : <span className="sub" style={{ marginLeft: 0 }}>not set</span>}
+              {start && (!end || end.lon !== start.lon || end.lat !== start.lat) && <> <button onClick={() => setEnd(start)} title="Make this a round trip back to the start point">Return to start</button></>}
+            </dd>
             <dt>Waypoints</dt>
-            <dd>{wpIds.length === 0 ? <span className="sub" style={{ marginLeft: 0 }}>none (add from a point of interest)</span> : (
-              <ul className="plain" style={{ margin: 0 }}>{wpIds.map((id, i) => (
-                <li key={id}>{poiById(id)?.name}{" "}
-                  <button disabled={i === 0} onClick={() => setWpIds((w) => { const n = [...w]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })}>Up</button>{" "}
-                  <button onClick={() => setWpIds((w) => w.filter((x) => x !== id))}>Remove</button></li>))}</ul>)}</dd>
+            <dd>
+              {wpIds.length === 0 ? <span className="sub" style={{ marginLeft: 0 }}>none yet</span> : (
+                <ul className="plain" style={{ margin: 0 }}>{wpIds.map((id, i) => (
+                  <li key={id}>{poiById(id)?.name}{" "}
+                    <button disabled={i === 0} onClick={() => setWpIds((w) => { const n = [...w]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; })}>Up</button>{" "}
+                    <button onClick={() => setWpIds((w) => w.filter((x) => x !== id))}>Remove</button></li>))}</ul>)}
+              {remainingPois.length > 0 && (
+                <select
+                  className="add-stop"
+                  value=""
+                  aria-label="Add a science stop"
+                  onChange={(e) => { const id = e.target.value; if (id) setWpIds((w) => (w.includes(id) ? w : [...w, id])); }}
+                >
+                  <option value="">Add a science stop…</option>
+                  {remainingPois.map((poi) => <option key={poi.id} value={poi.id}>{poi.name.split(" (")[0]}</option>)}
+                </select>
+              )}
+            </dd>
             <dt>Speed (km/h)</dt><dd><input type="number" min={0.1} step={0.1} value={speed} onChange={(e) => setSpeed(Math.max(0.1, +e.target.value || DEFAULT_SPEED_KMH))} /> <span className="sub" style={{ marginLeft: 0 }}>your assumption, not validated</span></dd>
           </dl>
-          <div className="btns"><button className="primary" disabled={!stopsReady} onClick={run}>Plan routes</button></div>
-          {!stopsReady && <div className="sub" style={{ marginLeft: 0, marginTop: 4 }}>Select a start and a destination on the map first.</div>}
+          <div className="btns"><button className="primary" disabled={!stopsReady} onClick={run}>{plan ? "Replan routes" : "Plan routes"}</button></div>
+          {!stopsReady && (
+            <>
+              <div className="sub" style={{ marginLeft: 0, marginTop: 4 }}>
+                Click the map or a point of interest, then use <strong>Set as start</strong> and <strong>Set as destination</strong> under Selected location above.
+              </div>
+              {!scenario && <div className="btns"><button onClick={() => loadScenario(DELTA_MARGIN_EVA)}>Or load the demo EVA</button></div>}
+            </>
+          )}
+          {start && end && wpIds.length === 0 && start.lon === end.lon && start.lat === end.lat && (
+            <div className="sub" style={{ marginLeft: 0, marginTop: 4 }}>Start and destination are the same point: add a science stop to make it a round trip.</div>
+          )}
           {([["Start", start], ["Destination", end]] as const).map(([name, pt]) => {
             const pr = pt ? probe(pt) : null;
             return pr && pr.cls === "unknown" ? (
@@ -656,8 +881,8 @@ export default function App() {
             <table>
               <thead><tr><th></th><th>Route</th><th className="num">km</th><th className="num">Cost</th><th className="num">Mean deg</th><th className="num">Unknown</th></tr></thead>
               <tbody>{plan.routes.map((r) => (
-                <tr key={r.profile}>
-                  <td><input type="radio" name="route" checked={active === r.profile} onChange={() => setActive(r.profile)} /></td>
+                <tr key={r.profile} className={`route-row${active === r.profile ? " sel" : ""}`} onClick={() => setActive(r.profile)}>
+                  <td><input type="radio" name="route" aria-label={`Show the ${r.label} route`} checked={active === r.profile} onChange={() => setActive(r.profile)} /></td>
                   <td><span className="sw" style={{ display: "inline-block", background: ROUTE_COLORS[r.profile], marginRight: 4 }} />{r.label}{r.duplicateOf ? " (same path)" : ""}</td>
                   <td className="num">{f(r.metrics.distanceKm, 2)}</td>
                   <td className="num">{f(r.metrics.referenceCost, 2)}</td>
@@ -671,29 +896,14 @@ export default function App() {
         )}
 
         {plan && activeRoute && start && end && (
-          <Panel title={`Mission summary · ${activeRoute.label}`} className="workspace-panel planner-panel" info="Metrics for the active route and exports for a habitat log. Ascent and descent are derived from the DEM along the grid path. Open the elevation profile under the map for the path graph.">
+          <Panel id="mission-summary" title={`Mission summary · ${activeRoute.label}`} className="workspace-panel planner-panel" info="Planning checks, metrics and exports for the active route. Ascent and descent are derived from the DEM along the grid path. Trace the elevation profile under the map to follow the route.">
+            <EvaChecksList checks={checks} />
             <dl className="kv">
               <dt>From</dt><dd>{coord(snap(start))}</dd>
               <dt>To</dt><dd>{coord(snap(end))}</dd>
               <dt>Distance</dt><dd>{f(activeRoute.metrics.distanceKm, 2)} km along the grid path</dd>
-              <dt>Duration</dt><dd>{f(activeRoute.metrics.distanceKm / speed, 1)} h walking at an assumed {speed} km/h (slope not applied)</dd>
-              <dt>EVA budget</dt>
-              <dd>
-                {(() => {
-                  const walkH = activeRoute.metrics.distanceKm / speed;
-                  const scienceH = scenario?.scienceHours ?? 0;
-                  const budget = scenario?.evaBudgetHours ?? null;
-                  const total = walkH + scienceH;
-                  if (budget == null) return <>{f(total, 1)} h (walk {f(walkH, 1)} + science {f(scienceH, 1)}); no scenario budget set</>;
-                  const over = total > budget + 1e-6;
-                  return (
-                    <span className={over ? "err" : undefined}>
-                      {f(total, 1)} h used (walk {f(walkH, 1)} + science {f(scienceH, 1)}) vs {budget} h budget
-                      {over ? " — OVER BUDGET" : " — within budget"}
-                    </span>
-                  );
-                })()}
-              </dd>
+              <dt>Duration</dt><dd>{f(walkHours + scienceHours, 1)} h total: {f(walkHours, 1)} h walking at an assumed {speed} km/h (slope not applied){scienceHours > 0 ? ` + ${f(scienceHours, 1)} h science` : ""}</dd>
+              <dt>Radiation</dt><dd>about {evaDoseMsv.toFixed(2)} mSv from cosmic rays over this EVA at the quiet-sun rate measured at Gale (order of magnitude)</dd>
               <dt>Terrain (km)</dt><dd>low {f(activeRoute.metrics.distanceByClassKm.low, 2)}, moderate {f(activeRoute.metrics.distanceByClassKm.moderate, 2)}, high {f(activeRoute.metrics.distanceByClassKm.high, 2)}, unknown {f(activeRoute.metrics.distanceByClassKm.unknown, 2)}</dd>
               <dt>Slope</dt><dd>mean {f(activeRoute.metrics.meanSlopeDeg)} deg, max {f(activeRoute.metrics.maxSlopeDeg)} deg (known cells only)</dd>
               <dt>Ascent / descent</dt><dd>{f(activeRoute.metrics.ascentM, 0)} m / {f(activeRoute.metrics.descentM, 0)} m (derived)</dd>
@@ -706,6 +916,131 @@ export default function App() {
             <div className="sub" style={{ marginLeft: 0, marginTop: 6 }}>Cost model: step length × (1 + (slope / S0)²); unknown slope uses a penalty factor; steps above the profile max slope are excluded. Planning assumptions only — see METHODOLOGY.md.</div>
           </Panel>
         )}
+
+        <Panel title="Mission scenario" className="mission workspace-panel overview-panel planner-panel" info="Loads a demonstration Marswalk with science goal, habitat proxy, waypoints, speed, and Cautious routing defaults. You can still edit stops after loading.">
+          {!scenario && (
+            <>
+              <div className="sub" style={{ marginLeft: 0, marginBottom: 6 }}>
+                Load a demonstration Marswalk with science goal, habitat proxy, waypoints, and Cautious routing defaults.
+              </div>
+              <div className="btns">
+                <button className="primary" onClick={() => loadScenario(DELTA_MARGIN_EVA)}>Load Jezero Delta Margin EVA</button>
+              </div>
+              <div className="sub" style={{ marginLeft: 0, marginTop: 6 }}>Plans the round trip and opens the Mission planner.</div>
+            </>
+          )}
+          {scenario && (
+            <>
+              <strong>{scenario.title}</strong>
+              <p className="mission-obj">{scenario.objective}</p>
+              <dl className="kv">
+                <dt>EVA budget</dt>
+                <dd>{scenario.evaBudgetHours} h concept ({scenario.scienceHours} h science + walking at {scenario.speedKmh} km/h)</dd>
+                <dt>Safety posture</dt>
+                <dd>{scenario.safetyPosture}</dd>
+                <dt>Preferred profile</dt>
+                <dd>{scenario.preferredProfile}</dd>
+              </dl>
+              <ul className="plain">
+                {scenario.notes.map((n) => <li key={n}>{n}</li>)}
+              </ul>
+              <div className="btns" style={{ marginTop: 6 }}>
+                <button onClick={() => loadScenario(scenario)}>Reload &amp; replan</button>
+                <button onClick={() => setScenario(null)}>Dismiss brief</button>
+                {workspace === "overview" && plan && <button className="primary" onClick={() => go("planner")}>Open planner</button>}
+              </div>
+            </>
+          )}
+        </Panel>
+
+        <ConditionsPanel
+          className="workspace-panel overview-panel explorer-panel planner-panel"
+          nowMs={nowMs}
+          siteLat={siteLat}
+          lsDeg={sun.ls}
+          season={sun.season}
+          daylightMarsH={sun.marsH}
+          daylightEarthH={sun.earthH}
+          meda={meda}
+          weather={weather}
+          onRefresh={() => refreshWeather(true)}
+        />
+
+        <Panel title="Safety context" className="safety workspace-panel explorer-panel planner-panel" info="Crew-awareness notes only. Radiation figures are order-of-magnitude. Roughness, rocks, terrain shadowing and particle-event dose are not modelled. Prefer Cautious near high or unknown slope.">
+          <div className="safety-lead">NASA priority is crew safety. This panel states what the tool models and what it does not.</div>
+
+          {selected && sel && (
+            <div className="safety-box">
+              <strong>At selected point</strong>
+              <div>
+                Slope class: <strong>{CLASS_LABEL[sel.cls]}</strong>
+                {sel.cls === "unknown" && <span className="err"> — treat as hazard until better data is available</span>}
+                {sel.cls === "high" && <span className="err"> — prefer Cautious profile or avoid if possible</span>}
+                {sel.cls === "moderate" && <span> — usable with care; check THEMIS night infrared for rocky versus dusty ground</span>}
+                {sel.cls === "low" && <span> — lower slope penalty in the planner</span>}
+              </div>
+            </div>
+          )}
+
+          {activeRoute && (
+            <div className="safety-box">
+              <strong>On active route ({activeRoute.label})</strong>
+              <div>
+                Unknown-slope share: {(activeRoute.metrics.unknownShare * 100).toFixed(0)}%
+                {activeRoute.metrics.unknownShare > 0.05
+                  ? <span className="err"> — significant gaps; consider Cautious or a different corridor</span>
+                  : <span> — low data gap on this path</span>}
+              </div>
+              <div>
+                Max known slope: {f(activeRoute.metrics.maxSlopeDeg)} deg
+                {activeRoute.profile === "shortest" && (activeRoute.metrics.maxSlopeDeg ?? 0) > 10 && (
+                  <span className="err"> — Shortest profile ignores moderate slopes; review Balanced or Cautious</span>
+                )}
+              </div>
+              {activeRoute.profile !== "cautious" && (activeRoute.metrics.unknownShare > 0.02 || (activeRoute.metrics.maxSlopeDeg ?? 0) > 12) && (
+                <div className="safety-rec">Recommendation: switch to <strong>Cautious</strong> when science targets sit near high-slope or unknown cells.</div>
+              )}
+            </div>
+          )}
+
+          <div className="safety-box">
+            <strong>Radiation (order of magnitude)</strong>
+            <div>
+              Typical GCR <strong>dose equivalent</strong> at the surface is about <strong>{SAFETY.gcrDoseMsvPerDay} mSv/day</strong>
+              (~{SAFETY.gcrDoseMgyPerDay} mGy/day absorbed), from Curiosity RAD at Gale crater (Hassler et al. 2014) — not Jezero-specific.
+              {activeRoute
+                ? <> The planned {f(walkHours + scienceHours, 1)} h EVA is about <strong>{evaDoseMsv.toFixed(2)} mSv</strong> at that rate under quiet conditions.</>
+                : <> A multi-hour EVA is a small fraction of that daily rate under quiet conditions.</>}
+            </div>
+            <div className="sub" style={{ marginLeft: 0, marginTop: 4 }}>{SAFETY.speNote}</div>
+          </div>
+
+          <div className="safety-cols">
+            <div>
+              <strong>Modelled here</strong>
+              <ul className="plain">
+                {SAFETY.modelled.map((x) => <li key={x}>{x}</li>)}
+              </ul>
+            </div>
+            <div>
+              <strong>Not modelled</strong>
+              <ul className="plain">
+                {SAFETY.notModelled.map((x) => <li key={x}>{x}</li>)}
+              </ul>
+            </div>
+          </div>
+          <div className="sub" style={{ marginLeft: 0, marginTop: 6 }}>
+            Cost-profile parameters and slope bins are planning assumptions, not certified mobility or medical limits. See METHODOLOGY.md.
+          </div>
+        </Panel>
+
+        <DataInventoryPanel
+          className="workspace-panel overview-panel"
+          trek={basemap}
+          meda={meda}
+          weather={weather}
+          traverseSol={traverse?.lastSol ?? null}
+        />
       </aside>
 
       <footer className="status">

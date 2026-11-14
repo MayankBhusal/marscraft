@@ -40,10 +40,13 @@ export interface HiriseFootprint {
 
 export interface LayerState {
   basemap: boolean;
+  ctx: boolean;
+  hiriseMosaic: boolean;
   themisDay: boolean;
   themisNight: boolean;
   minerals: boolean;
   hirise: boolean;
+  traverse: boolean;
   elevation: boolean;
   slope: boolean;
   terrainClass: boolean;

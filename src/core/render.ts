@@ -87,14 +87,14 @@ export function classImage(g: Grid, slope: Float32Array): string {
 export const cssRamp = (stops: [number, number, number, number][]) =>
   `linear-gradient(to right, ${stops.map(([t, r, g, b]) => `rgb(${r | 0},${g | 0},${b | 0}) ${t * 100}%`).join(", ")})`;
 
-/** Semi-transparent green where walk-back to habitat is feasible within radiusM. */
+/** Semi-transparent cyan-blue where walk-back to habitat is feasible within radiusM. */
 export function reachabilityImage(g: Grid, distM: Float32Array, radiusM: number): string {
   return paint(g, 1, (i) => {
     const d = distM[i];
     if (!Number.isFinite(d) || d > radiusM) return [0, 0, 0, 0];
     // Fade toward the edge of the radius
     const t = 1 - d / radiusM;
-    const a = Math.round(40 + 90 * t);
-    return [46, 140, 90, a];
+    const a = Math.round(130 + 90 * t);
+    return [0, 190, 255, a];
   });
 }

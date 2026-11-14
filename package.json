@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "data:synthetic": "node scripts/make_synthetic_dem.mjs",
-    "data:real": "python3 scripts/prepare_dem.py"
+    "data:real": "python3 scripts/prepare_dem.py",
+    "data:context": "node scripts/fetch_nasa_context.mjs"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
