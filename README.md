@@ -1,3 +1,5 @@
+Live deployed app: https://marscraft-five.vercel.app/
+
 # MarsCraft
 
 A terrain-aware exploration planning prototype for human exploration of Mars, built for the 2026 NASA Space Apps Challenge ("Interplanetary Survival Guide: Martian Map"). It is an independent project and is not endorsed by NASA.
@@ -17,7 +19,7 @@ Planning surface traverses needs terrain, science targets, current conditions an
 3. **Scientific Discovery.** Four literature-sourced points with category, reported observations, instrument, source and caveats. Points can be added as route waypoints.
 4. **Current conditions.** Season and day length computed for today at the EVA site; the latest public MEDA surface-weather report; CME arrivals at Mars predicted by the WSA-ENLIL model in NASA DONKI. Each feed is labelled live, cached or offline snapshot.
 5. **Mission scenario.** One demonstration Marswalk (Jezero Delta Margin EVA) with science objective, habitat proxy, waypoints, EVA budget and Cautious defaults.
-6. **Marswalk Planner.** A* routing under three documented cost profiles, side-by-side comparison on a common reference cost, generated explanations, pre-EVA planning checks (time budget, daylight, space weather, slope, rover ground truth, data gaps), an elevation profile that traces the route on the map, GeoJSON export and summary download.
+6. **Marswalk Planner.** A* routing under three documented cost profiles, side-by-side comparison on a common reference cost, generated explanations, pre-EVA planning checks (time budget, daylight, space weather, slope, rover ground truth, data gaps), elevation and slope profiles that trace the route on the map, a Cautious-profile walk-back reachability overlay, GeoJSON export and summary download.
 
 ## Navigation
 
@@ -33,11 +35,12 @@ Needs Node.js 20.19 or later.
 
 ```bash
 npm install
-npm run data:synthetic   # development grid, already generated in the repo
 npm run dev              # http://localhost:5173
 npm test
 npm run build
 ```
+
+The checked-in DEM is the real HRSC+MOLA Jezero grid, so no data-generation step is needed for normal development. `npm run data:synthetic` replaces it with generated terrain that is not Mars data; use that only when intentionally testing synthetic-terrain behavior.
 
 Real data (needs internet, `pip install rasterio numpy`):
 
