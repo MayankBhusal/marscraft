@@ -183,7 +183,170 @@ export function ElevationProfile({
   );
 }
 
+export function SlopeProfile({
+  grid,
+  slope,
+  path,
+  marks = [],
+  onScrub,
+}: {
+  grid: Grid;
+  slope: Float32Array;
+  path: PathCell[];
+  marks?: ProfileMark[];
+  onScrub?: (pathIndex: number | null) => void;
+}) {
+  const profile = useMemo(() => buildSlopeProfile(grid, slope, path), [grid, slope, path]);
+  const box = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(720);
+  const [hover, setHover] = useState<number | null>(null);
+
+  useEffect(() => {
+    const node = box.current;
+    if (!node) return;
+    const ro = new ResizeObserver(([entry]) => setWidth(Math.max(280, Math.round(entry.contentRect.width))));
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => setHover(null), [path]);
+
+  if (!profile) {
+    return <div ref={box} className="elev-profile"><div className="sub" style={{ marginLeft: 0 }}>Not enough slope samples on this path.</div></div>;
+  }
+
+  const innerW = width - PAD.l - PAD.r;
+  const innerH = CHART_H - PAD.t - PAD.b;
+  const { points, validPoints, totalM, maxSlope } = profile;
+  const maxY = Math.max(5, Math.ceil(maxSlope / 5) * 5);
+  const x = (d: number) => PAD.l + (d / (totalM || 1)) * innerW;
+  const y = (value: number) => PAD.t + (1 - value / maxY) * innerH;
+  const base = PAD.t + innerH;
+  const yTicks = [...new Set([0, 1, 2, 3, 4].map((i) => Math.round((maxY * i) / 4)))];
+  const xTicks = [0, totalM / 2, totalM];
+  const segments: Array<Array<SlopeProfilePoint & { slope: number }>> = [];
+  for (const point of points) {
+    if (point.slope == null) continue;
+    const knownPoint = { ...point, slope: point.slope };
+    const segment = segments[segments.length - 1];
+    if (segment && segment[segment.length - 1].index === point.index - 1) segment.push(knownPoint);
+    else segments.push([knownPoint]);
+  }
+  const at = hover == null ? null : validPoints[hover];
+
+  const scrub = (e: PointerEvent<SVGSVGElement>) => {
+    const d = ((e.clientX - e.currentTarget.getBoundingClientRect().left - PAD.l) / innerW) * totalM;
+    let best = 0;
+    for (let i = 1; i < validPoints.length; i++) {
+      if (Math.abs(validPoints[i].d - d) < Math.abs(validPoints[best].d - d)) best = i;
+    }
+    setHover(best);
+    onScrub?.(validPoints[best].index);
+  };
+  const leave = () => { setHover(null); onScrub?.(null); };
+
+  return (
+    <div ref={box} className="elev-profile">
+      <svg
+        className="elev-profile-chart"
+        width={width}
+        height={CHART_H}
+        viewBox={`0 0 ${width} ${CHART_H}`}
+        role="img"
+        aria-label={`Route slope profile, ${(totalM / 1000).toFixed(2)} kilometres, maximum slope ${maxSlope.toFixed(1)} degrees`}
+        onPointerMove={scrub}
+        onPointerDown={scrub}
+        onPointerLeave={leave}
+      >
+        {yTicks.map((value) => (
+          <g key={`y${value}`}>
+            <line x1={PAD.l} x2={PAD.l + innerW} y1={y(value)} y2={y(value)} className="ep-grid" />
+            <text x={PAD.l - 10} y={y(value) + 4} textAnchor="end" className="ep-label">{value}°</text>
+          </g>
+        ))}
+        {xTicks.map((d, i) => (
+          <text key={`x${i}`} x={x(d)} y={CHART_H - 8} textAnchor={i === 0 ? "start" : i === 2 ? "end" : "middle"} className="ep-label">
+            {`${(d / 1000).toFixed(1)} km`}
+          </text>
+        ))}
+        <text x={PAD.l} y={11} className="ep-axis-title">SLOPE · DEGREES</text>
+        {segments.map((segment, i) => {
+          const poly = segment.map((point) => `${x(point.d).toFixed(1)},${y(point.slope).toFixed(1)}`).join(" ");
+          return (
+            <g key={i}>
+              {segment.length > 1 && <polygon points={`${x(segment[0].d)},${base} ${poly} ${x(segment[segment.length - 1].d)},${base}`} className="ep-slope-area" />}
+              <polyline points={poly} className="ep-slope-line" fill="none" />
+              {segment.length === 1 && <circle cx={x(segment[0].d)} cy={y(segment[0].slope)} r={2} className="ep-slope-dot" />}
+            </g>
+          );
+        })}
+        {marks.map((mark) => {
+          const point = validPoints.find((p) => p.index >= mark.index);
+          if (!point) return null;
+          const mx = x(point.d);
+          return (
+            <g key={`${mark.index}-${mark.label}`}>
+              <line x1={mx} x2={mx} y1={PAD.t} y2={base} className="ep-mark" />
+              <text x={Math.min(Math.max(mx, PAD.l + 40), PAD.l + innerW - 40)} y={PAD.t - 6} textAnchor="middle" className="ep-mark-label">{mark.label}</text>
+            </g>
+          );
+        })}
+        {validPoints[0].index === 0 && <circle cx={x(validPoints[0].d)} cy={y(validPoints[0].slope)} r={4} className="ep-start" />}
+        {validPoints[validPoints.length - 1].index === path.length - 1 && <circle cx={x(validPoints[validPoints.length - 1].d)} cy={y(validPoints[validPoints.length - 1].slope)} r={4} className="ep-end" />}
+        {at && (
+          <g pointerEvents="none">
+            <line x1={x(at.d)} x2={x(at.d)} y1={PAD.t} y2={base} className="ep-cursor" />
+            <circle cx={x(at.d)} cy={y(at.slope)} r={5} className="ep-cursor-dot" />
+          </g>
+        )}
+      </svg>
+      <div className="elev-profile-foot">
+        {at ? (
+          <span className="ep-readout">
+            <strong>{(at.d / 1000).toFixed(2)} km</strong> · {at.slope.toFixed(1)}° · {CLASS_SHORT[classify(at.slope)]} class
+          </span>
+        ) : (
+          <>
+            <span><span className="ep-sw start" /> Start</span>
+            <span><span className="ep-sw end" /> Destination</span>
+            <span><span className="ep-slope-key" /> Slope (degrees)</span>
+            {points.some((point) => point.slope == null) && <span>Gaps = unknown slope</span>}
+            <span className="ep-hint">Move over the chart to trace the route on the map</span>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 interface ProfilePoint { d: number; e: number; index: number; slope: number; cls: TerrainClass }
+interface SlopeProfilePoint { d: number; index: number; slope: number | null }
+
+function buildSlopeProfile(grid: Grid, slope: Float32Array, path: PathCell[]) {
+  const points: SlopeProfilePoint[] = [];
+  let totalM = 0;
+  let maxSlope = 0;
+  for (let i = 0; i < path.length; i++) {
+    const cell = path[i];
+    if (i > 0) {
+      const previous = path[i - 1];
+      totalM += haversineM(
+        grid.centerLon(previous.c),
+        grid.centerLat(previous.r),
+        grid.centerLon(cell.c),
+        grid.centerLat(cell.r),
+        grid.meta.radiusM,
+      );
+    }
+    const value = slope[grid.idx(cell.r, cell.c)];
+    const slopeValue = Number.isFinite(value) ? value : null;
+    if (slopeValue != null) maxSlope = Math.max(maxSlope, slopeValue);
+    points.push({ d: totalM, index: i, slope: slopeValue });
+  }
+  const validPoints = points.filter((point): point is SlopeProfilePoint & { slope: number } => point.slope != null);
+  if (validPoints.length < 2) return null;
+  return { points, validPoints, totalM, maxSlope };
+}
 
 function buildProfile(grid: Grid, slope: Float32Array, path: PathCell[]) {
   const raw: ProfilePoint[] = [];

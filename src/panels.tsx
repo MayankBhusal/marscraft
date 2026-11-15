@@ -3,7 +3,6 @@ import { Panel } from "./ui";
 import { CheckStatus, EvaCheck, MarsArrival, MedaSummary, SpaceWeatherAssessment, SW_ALERT_HOURS } from "./core/conditions";
 import { RoverStop } from "./core/rover";
 import { DONKI_WINDOW_DAYS, Feed, FeedOrigin, RAW_IMAGES_GALLERY, RoverImage, SpaceWeatherData, loadRoverImages } from "./nasa";
-import { CHALLENGE_RESOURCES } from "./config";
 
 export type Loadable<T> = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; value: T };
 
@@ -253,14 +252,6 @@ export function DataInventoryPanel(p: {
           ))}
         </tbody>
       </table>
-      <details style={{ marginTop: 8 }}>
-        <summary>Challenge resources</summary>
-        <ul className="plain resources">
-          {CHALLENGE_RESOURCES.map((r) => (
-            <li key={r.url}><a href={r.url} target="_blank" rel="noreferrer">{r.name}</a><div className="sub flush">{r.use}</div></li>
-          ))}
-        </ul>
-      </details>
     </Panel>
   );
 }

@@ -12,7 +12,7 @@ import { DELTA_MARGIN_EVA, MissionScenario } from "./mission";
 import { loadMeda, loadRoverTraverse, loadSpaceWeather } from "./nasa";
 import { ConditionsPanel, DataInventoryPanel, EvaChecksList, LEVEL_LABEL, Loadable, MedaState, RoverGroundTruth, WeatherState } from "./panels";
 import { HiriseFootprint, LayerState, LonLat, PoiFull } from "./types";
-import { ElevationProfile, Panel, ProfileMark } from "./ui";
+import { ElevationProfile, Panel, ProfileMark, SlopeProfile } from "./ui";
 
 const f = (v: number | null | undefined, d = 1) => (v == null || Number.isNaN(v) ? "n/a" : v.toFixed(d));
 const coord = (p: LonLat) => `${p.lat.toFixed(4)} N, ${p.lon.toFixed(4)} E`;
@@ -56,6 +56,7 @@ export default function App() {
   const [active, setActive] = useState<ProfileId | null>(null);
   const [scenario, setScenario] = useState<MissionScenario | null>(null);
   const [showProfile, setShowProfile] = useState(true);
+  const [profileView, setProfileView] = useState<"elevation" | "slope">("elevation");
   const [fit, setFit] = useState<{ seq: number; target: FitTarget }>({ seq: 0, target: "jezero" });
   const [scrubIdx, setScrubIdx] = useState<number | null>(null);
   const skipInvalidate = useRef(false);
@@ -664,7 +665,12 @@ export default function App() {
           {traverse && (
             <div style={{ marginTop: 4 }}><strong>In situ:</strong> Perseverance traverse to sol {traverse.lastSol}, retrieved {traverse.retrieved}.</div>
           )}
-          <details style={{ marginTop: 4 }}><summary>Processing and limitations</summary><ul className="plain">{grid.meta.processing.map((x, i) => <li key={"p" + i}>{x}</li>)}{grid.meta.limitations.map((x, i) => <li key={"l" + i}>{x}</li>)}</ul></details>
+          <details className="disclosure" style={{ marginTop: 4 }}>
+            <summary>Processing and limitations</summary>
+            <div className="disclosure-body">
+              <ul className="plain">{grid.meta.processing.map((x, i) => <li key={"p" + i}>{x}</li>)}{grid.meta.limitations.map((x, i) => <li key={"l" + i}>{x}</li>)}</ul>
+            </div>
+          </details>
         </Panel>
       </aside>
 
@@ -712,20 +718,26 @@ export default function App() {
             <button type="button" onClick={() => requestFit("jezero")} title="Jezero crater, delta and rover traverse">Jezero</button>
             <button type="button" onClick={() => requestFit("region")} title="Whole analysed grid">Region</button>
             <button type="button" onClick={() => requestFit("route")} disabled={!activeRoute} title={activeRoute ? "Fit the active route" : "Plan a route first"}>Route</button>
+            {activeRoute && !showProfile && (
+              <button type="button" aria-label="Show elevation profile" onClick={() => { setProfileView("elevation"); setScrubIdx(null); setShowProfile(true); }} title="Show elevation profile">Profile</button>
+            )}
           </div>
-          {activeRoute && !showProfile && (
-            <button type="button" className="profile-toggle" onClick={() => setShowProfile(true)}>
-              Show elevation profile
-            </button>
-          )}
         </div>
         {activeRoute && showProfile && (
           <div className="profile-dock">
             <div className="profile-dock-head">
-              <span>Elevation along route · {activeRoute.label} · {f(activeRoute.metrics.distanceKm, 2)} km</span>
-              <button type="button" className="text-btn" onClick={() => setShowProfile(false)}>Hide</button>
+              <span>Route profile · {activeRoute.label} · {f(activeRoute.metrics.distanceKm, 2)} km</span>
+              <div className="profile-dock-actions">
+                <div className="profile-tabs" role="group" aria-label="Profile type">
+                  <button type="button" aria-pressed={profileView === "elevation"} onClick={() => { setProfileView("elevation"); setScrubIdx(null); }}>Elevation Profile</button>
+                  <button type="button" aria-pressed={profileView === "slope"} onClick={() => { setProfileView("slope"); setScrubIdx(null); }}>Slope Profile</button>
+                </div>
+                <button type="button" className="text-btn" onClick={() => setShowProfile(false)}>Hide</button>
+              </div>
             </div>
-            <ElevationProfile grid={grid} slope={slope} path={activeRoute.path} marks={profileMarks} onScrub={setScrubIdx} />
+            {profileView === "elevation"
+              ? <ElevationProfile grid={grid} slope={slope} path={activeRoute.path} marks={profileMarks} onScrub={setScrubIdx} />
+              : <SlopeProfile grid={grid} slope={slope} path={activeRoute.path} marks={profileMarks} onScrub={setScrubIdx} />}
           </div>
         )}
       </main>
@@ -781,31 +793,33 @@ export default function App() {
                 <button onClick={() => setWpIds((w) => (w.includes(selPoi.id) ? w : [...w, selPoi.id]))} disabled={wpIds.includes(selPoi.id)}>{wpIds.includes(selPoi.id) ? "Waypoint added" : "Add as waypoint"}</button>
               </div>
               {/* Open while exploring; folded in the planner so route results stay in reach. */}
-              <details className="poi-details" open={workspace !== "planner"}>
+              <details className="poi-details disclosure" open={workspace !== "planner"}>
                 <summary>Science notes, sources and surface view</summary>
-                <dl className="kv" style={{ marginTop: 4 }}>
-                  <dt>Status</dt><dd>{selPoi.status}</dd>
-                  <dt>Summary</dt><dd>{selPoi.summary}</dd>
-                  <dt>Reported</dt><dd>{selPoi.observations}</dd>
-                  <dt>Instrument</dt><dd>{selPoi.mission}</dd>
-                  <dt>Source</dt><dd>{selPoi.source}</dd>
-                  <dt>Caveats</dt><dd>{selPoi.uncertainty}</dd>
-                </dl>
-                {selPoi.pov && (
-                  <div className="pov">
-                    <div className="pov-title">What you may see · {selPoi.pov.title}</div>
-                    <img
-                      src={selPoi.pov.url.startsWith("http") ? selPoi.pov.url : (import.meta.env.BASE_URL + selPoi.pov.url)}
-                      alt={selPoi.pov.title}
-                      loading="lazy"
-                    />
-                    <div className="sub" style={{ marginLeft: 0 }}>{selPoi.pov.caption}</div>
-                    <div className="sub" style={{ marginLeft: 0 }}>
-                      {selPoi.pov.credit}
-                      {selPoi.pov.sourceUrl && <> · <a href={selPoi.pov.sourceUrl} target="_blank" rel="noreferrer">Source</a></>}
+                <div className="disclosure-body">
+                  <dl className="kv" style={{ marginTop: 4 }}>
+                    <dt>Status</dt><dd>{selPoi.status}</dd>
+                    <dt>Summary</dt><dd>{selPoi.summary}</dd>
+                    <dt>Reported</dt><dd>{selPoi.observations}</dd>
+                    <dt>Instrument</dt><dd>{selPoi.mission}</dd>
+                    <dt>Source</dt><dd>{selPoi.source}</dd>
+                    <dt>Caveats</dt><dd>{selPoi.uncertainty}</dd>
+                  </dl>
+                  {selPoi.pov && (
+                    <div className="pov">
+                      <div className="pov-title">What you may see · {selPoi.pov.title}</div>
+                      <img
+                        src={selPoi.pov.url.startsWith("http") ? selPoi.pov.url : (import.meta.env.BASE_URL + selPoi.pov.url)}
+                        alt={selPoi.pov.title}
+                        loading="lazy"
+                      />
+                      <div className="sub" style={{ marginLeft: 0 }}>{selPoi.pov.caption}</div>
+                      <div className="sub" style={{ marginLeft: 0 }}>
+                        {selPoi.pov.credit}
+                        {selPoi.pov.sourceUrl && <> · <a href={selPoi.pov.sourceUrl} target="_blank" rel="noreferrer">Source</a></>}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </details>
             </div>
           )}

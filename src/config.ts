@@ -121,15 +121,6 @@ export const DEFAULT_SITE_LAT = 18.44;
 /** A rover stop is offered as ground truth when it lies within this distance of the selected cell centre. */
 export const ROVER_NEAR_M = 1000;
 
-/** Challenge-supplied references. A link here does not mean the data are integrated; see DATA_SOURCES.md. */
-export const CHALLENGE_RESOURCES = [
-  { name: "JPL Mars Trek", url: "https://trek.nasa.gov/mars/", use: "Serves the Viking, THEMIS, CTX and HiRISE imagery." },
-  { name: "USGS-NASA Planetary Geologic Mapping", url: "https://astrogeology-usgs.hub.arcgis.com/pages/interactive-maps-mars", use: "Reference only; geologic units are not integrated." },
-  { name: "Curiosity's proposed path up Mount Sharp", url: "https://science.nasa.gov/resource/curiositys-proposed-path-up-mount-sharp/", use: "Route-map inspiration (different region)." },
-  { name: "Perseverance raw images", url: "https://mars.nasa.gov/mars2020/multimedia/raw-images/", use: "Navcam frames are queried for rover stops near a selected point." },
-  { name: "NASA Worldview", url: "https://worldview.earthdata.nasa.gov/", use: "Earth viewer; layered-map inspiration only." },
-] as const;
-
 /**
  * Safety context shown in the UI. These are published order-of-magnitude
  * figures for crew awareness, not operational limits or medical advice.
