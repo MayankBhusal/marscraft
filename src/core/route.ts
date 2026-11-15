@@ -36,8 +36,8 @@ export function stepLengthM(g: Grid, r1: number, c1: number, r2: number, c2: num
 /** Returns the cost multiplier for a step, or Infinity if excluded. */
 export function stepFactor(slope: Float32Array, i1: number, i2: number, p: CostParams): number {
   const s1 = slope[i1], s2 = slope[i2];
-  if (Number.isNaN(s1) || Number.isNaN(s2)) return p.unknownFactor;
-  if (s1 > p.maxSlopeDeg || s2 > p.maxSlopeDeg) return Infinity;
+  if ((Number.isFinite(s1) && s1 > p.maxSlopeDeg) || (Number.isFinite(s2) && s2 > p.maxSlopeDeg)) return Infinity;
+  if (!Number.isFinite(s1) || !Number.isFinite(s2)) return p.unknownFactor;
   const s = (s1 + s2) / 2;
   return 1 + (s / p.slopeRefDeg) ** 2;
 }

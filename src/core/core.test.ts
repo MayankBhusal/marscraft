@@ -79,6 +79,11 @@ describe("routing", () => {
     // Every wall-column cell on the path must be in the gap row.
     expect(p.filter((c) => c.c >= 11 && c.c <= 13).every((c) => c.r === 4)).toBe(true);
   });
+  it("excludes a known over-limit slope even when its neighbour is unknown", () => {
+    const mixed = new Float32Array([NaN, 16]);
+    expect(stepFactor(mixed, 0, 1, PROFILES.cautious.params)).toBe(Infinity);
+    expect(stepFactor(mixed, 0, 1, PROFILES.balanced.params)).toBe(PROFILES.balanced.params.unknownFactor);
+  });
   it("terrain changes the route: cautious detours around a hill that shortest crosses", () => {
     // Cone with ~11 degree flanks at 0.01 deg cells (~590 m): 120 m rise per cell.
     const g = mkGrid(41, 41, (r, c) => {

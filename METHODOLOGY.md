@@ -46,6 +46,8 @@ either slope > Smax:   step excluded
 step cost = L * factor
 ```
 
+A known slope above `Smax` excludes the step even when its neighbouring cell has unknown slope.
+
 Three profiles are always computed:
 
 | Profile | S0 (deg) | Smax (deg) | U |
