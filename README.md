@@ -19,7 +19,7 @@ Planning surface traverses needs terrain, science targets, current conditions an
 3. **Scientific Discovery.** Four literature-sourced points with category, reported observations, instrument, source and caveats. Points can be added as route waypoints.
 4. **Current conditions.** Season and day length computed for today at the EVA site; the latest public MEDA surface-weather report; CME arrivals at Mars predicted by the WSA-ENLIL model in NASA DONKI. Each feed is labelled live, cached or offline snapshot.
 5. **Mission scenario.** One demonstration Marswalk (Jezero Delta Margin EVA) with science objective, habitat proxy, waypoints, EVA budget and Cautious defaults.
-6. **Marswalk Planner.** A* routing under three documented cost profiles, side-by-side comparison on a common reference cost, generated explanations, pre-EVA planning checks (time budget, daylight, space weather, slope, rover ground truth, data gaps), elevation and slope profiles that trace the route on the map, a Cautious-profile walk-back reachability overlay, GeoJSON export and summary download.
+6. **Marswalk Planner.** A* routing under three documented cost profiles, side-by-side comparison on a common reference cost, generated explanations, pre-EVA planning checks (time budget, daylight, space weather, slope, rover ground truth, data gaps), elevation profilesand slope profiles that trace the route on the map, a Cautious-profile walk-back reachability overlay, GeoJSON export and summary download.
 
 ## Navigation
 
